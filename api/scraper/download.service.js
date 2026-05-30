@@ -836,9 +836,20 @@ async function resolveEmbedUrl(url, record, candidate) {
   // 1. SPECIFIC DOMAIN RESOLVERS FIRST
   if (host.includes("zilla-networks.com") && pathname.startsWith("/play/")) {
     debugLog("resolveEmbed", "Using Zilla-Networks resolver", null);
-    const videoId = pathname.split("/").pop();
+    const videoId = parsed.pathname.split("/").pop();
     if (videoId) {
       return `https://player.zilla-networks.com/m3u8/${videoId}`;
+    }
+  }
+
+  if (host.includes("pixeldrain.com")) {
+    debugLog("resolveEmbed", "Using Pixeldrain resolver", null);
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+    const isFileApi = pathParts[0]?.toLowerCase() === "api" && pathParts[1]?.toLowerCase() === "file" && pathParts[2];
+    const isUserShare = pathParts[0]?.toLowerCase() === "u" && pathParts[1];
+    const fileId = isFileApi ? pathParts[2] : (isUserShare ? pathParts[1] : pathParts[0]);
+    if (fileId) {
+      return `https://pixeldrain.com/api/file/${fileId}`;
     }
   }
 
