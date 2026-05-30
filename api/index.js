@@ -4,6 +4,7 @@ const axios = require('axios');
 const path = require('path');
 
 // Scraper services
+const { resolveEmbedUrl } = require('./scraper/download.service');
 const tioanimeService = require('./scraper/tioanime.service');
 const animeflvService = require('./scraper/animeflv.service');
 const animeav1Service = require('./scraper/animeav1.service');
@@ -30,9 +31,11 @@ const MANIFEST = {
 // Memory Cache Systems
 const metaCache = new Map();
 const streamCache = new Map();
+const directLinkCache = new Map();
 
 const CACHE_TTL_META = 24 * 60 * 60 * 1000; // 24 hours for metadata
-const CACHE_TTL_STREAMS = 3 * 60 * 60 * 1000; // 3 hours for stream links
+const CACHE_TTL_STREAMS = 3 * 60 * 60 * 1000; // 3 hours for stream lists
+const CACHE_TTL_DIRECT = 3 * 60 * 60 * 1000; // 3 hours for resolved direct video URLs
 
 // Helper to clean and normalize names for fuzzy matching
 function cleanName(name) {
@@ -125,8 +128,33 @@ async function findSlugInProvider(service, animeName, providerName) {
   return null;
 }
 
+// Resolve embed URL to direct video source URL
+async function resolveToDirectLink(id, embedUrl) {
+  const cached = directLinkCache.get(id);
+  const now = Date.now();
+
+  if (cached && (now - cached.timestamp < CACHE_TTL_DIRECT)) {
+    console.log(`[miColita Anime] [Cache] Direct video link for ${id} loaded from cache.`);
+    return cached.url;
+  }
+
+  console.log(`[miColita Anime] [Direct] Resolving embed: ${embedUrl} in real-time...`);
+  try {
+    // Call the anime1v-api resolveEmbedUrl function
+    const directUrl = await resolveEmbedUrl(embedUrl);
+    if (directUrl) {
+      console.log(`[miColita Anime] [Direct] Successfully resolved direct URL: ${directUrl.substring(0, 120)}...`);
+      directLinkCache.set(id, { url: directUrl, timestamp: now });
+      return directUrl;
+    }
+  } catch (err) {
+    console.error(`[miColita Anime] [Direct] Error resolving embed to direct link:`, err.message);
+  }
+  return null;
+}
+
 // Multi-provider cascade scraper execution
-async function getAnimeStreams(animeName, episodeNumber) {
+async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
   const cacheKey = `${cleanName(animeName)}:${episodeNumber}`;
   const cached = streamCache.get(cacheKey);
   const now = Date.now();
@@ -170,35 +198,56 @@ async function getAnimeStreams(animeName, episodeNumber) {
         if (links && links.success && links.data) {
           const data = links.data;
           
-          // API structure support for both variants
           const subLinks = data.streamLinks?.SUB || data.servers?.sub || [];
           const dubLinks = data.streamLinks?.DUB || data.servers?.dub || [];
 
           console.log(`[miColita Anime] [Scraper] Successfully extracted ${subLinks.length} SUB and ${dubLinks.length} DUB servers from ${prov.name}`);
 
-          // SUB stream cards mapping
-          subLinks.forEach((link, idx) => {
-            const emoji = idx === 0 ? '⭐' : '🔗';
+          // Process SUB links (Jap sub Esp)
+          subLinks.forEach((link) => {
+            const cleanServer = link.server.toUpperCase();
+            const playDirectUrl = `${protocol}://${host}/play/direct?url=${encodeURIComponent(link.url)}&id=${cleanName(animeName)}_E${episodeNumber}_${cleanName(link.server)}`;
+            
+            // 1. [NATIVO] Direct play redirect stream (plays inside Stremio)
+            streams.push({
+              name: `miColita\n${prov.name}`,
+              type: 'url',
+              title: `⭐ [NATIVO] [SUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Jap (Sub Esp)\n🎬 Reproducción nativa en reproductor interno\n⚡ Resolvedor inteligente de video en tiempo real`,
+              url: playDirectUrl
+            });
+
+            // 2. [EMBED] Standard redirect embed (opens in browser as backup)
             streams.push({
               name: `miColita\n${prov.name}`,
               type: 'embed',
-              title: `${emoji} [SUB] ${link.server}\n📺 Cap. ${episodeNumber} • Audio: Jap (Sub Esp)\n⚡ Servidor Rápido\n💬 Selección interna\n⚠️ Abre en navegador`,
+              title: `🔗 [EMBED] [SUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Jap (Sub Esp)\n🌐 Abre en el navegador (Opción tradicional)`,
               externalUrl: link.url
             });
           });
 
-          // DUB stream cards mapping
-          dubLinks.forEach((link, idx) => {
-            const emoji = idx === 0 ? '⭐' : '🔗';
+          // Process DUB links (Spanish Dub / Audio Dual)
+          dubLinks.forEach((link) => {
+            const cleanServer = link.server.toUpperCase();
+            const playDirectUrl = `${protocol}://${host}/play/direct?url=${encodeURIComponent(link.url)}&id=${cleanName(animeName)}_E${episodeNumber}_${cleanName(link.server)}`;
+
+            // 1. [NATIVO] Direct play redirect stream (plays inside Stremio)
+            streams.push({
+              name: `miColita\n${prov.name}`,
+              type: 'url',
+              title: `⭐ [NATIVO] [DUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Español Latino/Castellano\n🎬 Reproducción nativa en reproductor interno\n⚡ Resolvedor inteligente de video en tiempo real`,
+              url: playDirectUrl
+            });
+
+            // 2. [EMBED] Standard redirect embed (opens in browser as backup)
             streams.push({
               name: `miColita\n${prov.name}`,
               type: 'embed',
-              title: `${emoji} [DUB] ${link.server}\n📺 Cap. ${episodeNumber} • Audio: Español Latino/Castellano\n⚡ Servidor Rápido\n🔊 Audio Dual/Dob\n⚠️ Abre en navegador`,
+              title: `🔗 [EMBED] [DUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Español Latino/Castellano\n🌐 Abre en el navegador (Opción tradicional)`,
               externalUrl: link.url
             });
           });
 
-          // Break loop as soon as we get active streams (short-circuit for massive speed)
+          // Short-circuit cascade for massive speed
           if (streams.length > 0) {
             console.log(`[miColita Anime] [Scraper] Found ${streams.length} streams in ${prov.name}. Stopping provider cascade.`);
             break;
@@ -557,8 +606,8 @@ function getLandingPageHtml(host, protocol) {
                 </div>
                 <div class="feature-card">
                     <i class="fa-solid fa-bolt"></i>
-                    <h3>Súper Veloz</h3>
-                    <p>Caché distribuida y optimizada de metadatos para respuestas en menos de 1 segundo.</p>
+                    <h3>NATIVO Premium</h3>
+                    <p>Resolvedor en tiempo real de enlaces de video directos para reproducción sin abrir navegador.</p>
                 </div>
             </div>
         </div>
@@ -606,10 +655,36 @@ app.get('/manifest.json', (req, res) => {
   res.json(MANIFEST);
 });
 
+// Real-time redirect play route using the download.service.js resolveEmbedUrl function
+app.get('/play/direct', async (req, res) => {
+  const { url, id } = req.query;
+  if (!url) {
+    return res.status(400).send('Falta el parámetro url');
+  }
+
+  console.log(`[miColita Anime] [/play/direct] Request to resolve direct link for: ${id} (${url})`);
+
+  try {
+    const directUrl = await resolveToDirectLink(url, url);
+    if (directUrl) {
+      console.log(`[miColita Anime] [/play/direct] Redirecting to direct stream: ${directUrl.substring(0, 100)}...`);
+      return res.redirect(302, directUrl);
+    }
+  } catch (err) {
+    console.error(`[miColita Anime] [/play/direct] Failed resolving embed to direct link:`, err.message);
+  }
+
+  console.log(`[miColita Anime] [/play/direct] Redirecting to fallback external url: ${url}`);
+  return res.redirect(302, url);
+});
+
 // Universal Stremio Stream Route supporting all prefixes
 app.get('/stream/:type/:id.json', async (req, res) => {
   let { type, id } = req.params;
   id = id.replace('.json', '');
+
+  const host = req.get('host');
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
 
   console.log(`[miColita Anime] Stream request - Type: ${type}, ID: ${id}`);
 
@@ -640,7 +715,7 @@ app.get('/stream/:type/:id.json', async (req, res) => {
     const animeName = meta.name;
     console.log(`[miColita Anime] Resolved title: "${animeName}" (Episode: ${episodeNumber})`);
 
-    const streams = await getAnimeStreams(animeName, episodeNumber);
+    const streams = await getAnimeStreams(animeName, episodeNumber, host, protocol);
     return res.json({ streams });
   } catch (err) {
     console.error(`[miColita Anime] Error processing streams for ${id}:`, err.message);
