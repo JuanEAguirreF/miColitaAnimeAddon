@@ -1,15 +1,14 @@
 version: '3.8'
 
 services:
-  micolita-addon:
+  micolita-anime-addon:
     build: .
-    container_name: micolita-stremio
+    container_name: micolita-anime-stremio
     restart: unless-stopped
     ports:
-      - "7000:7000"
+      - "7001:7000"
     environment:
       - PORT=7000
-      - RESOLVE_DIRECT_LINKS=true # Activa la resolución de enlaces directos usando Puppeteer
     logging:
       driver: "json-file"
       options:
