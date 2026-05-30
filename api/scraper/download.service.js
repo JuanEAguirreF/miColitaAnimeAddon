@@ -76,6 +76,14 @@ async function resolveEmbedWithPuppeteer(url, referer) {
           if (playBtn) await playBtn.click();
         } catch(e) {}
       }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // Try clicking the center of the screen as a generic play trigger
+    if (!interceptedUrl) {
+      try {
+        await page.mouse.click(640, 360);
+      } catch(e) {}
       await new Promise(r => setTimeout(r, 3000));
     }
 
@@ -826,6 +834,14 @@ async function resolveEmbedUrl(url, record, candidate) {
   debugLog("resolveEmbed", `Host: ${host}, Path: ${pathname}`, url);
 
   // 1. SPECIFIC DOMAIN RESOLVERS FIRST
+  if (host.includes("zilla-networks.com") && pathname.startsWith("/play/")) {
+    debugLog("resolveEmbed", "Using Zilla-Networks resolver", null);
+    const videoId = pathname.split("/").pop();
+    if (videoId) {
+      return `https://player.zilla-networks.com/m3u8/${videoId}`;
+    }
+  }
+
   if (/streamwish|sfastwish|flaswish/i.test(host)) {
     debugLog("resolveEmbed", "Using Streamwish resolver", null);
     const resolved = await resolveStreamwishUrl(url, referer);
