@@ -3,7 +3,7 @@ const PORT = process.env.PORT || 7000;
 
 app.listen(PORT, () => {
   console.log(`====================================================`);
-  console.log(`🚀 Addon Micolita corriendo localmente en el puerto ${PORT}`);
+  console.log(`🚀 Addon miColita Anime corriendo en el puerto ${PORT}`);
   console.log(`====================================================`);
   console.log(`Página de Inicio: http://localhost:${PORT}/`);
   console.log(`Manifest URL:    http://localhost:${PORT}/manifest.json`);
