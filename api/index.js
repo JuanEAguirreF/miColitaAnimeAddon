@@ -203,7 +203,7 @@ async function getAlternativeTitlesFromKitsu(name) {
   return [];
 }
 
-// Multi-provider cascade scraper execution
+// Multi-provider cascade scraper execution in parallel
 async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
   const cacheKey = `${cleanName(animeName)}:${episodeNumber}`;
   const cached = streamCache.get(cacheKey);
@@ -235,9 +235,8 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
     { name: 'JKAnime', service: jkanimeService }
   ];
 
-  const streams = [];
-
-  for (const prov of providers) {
+  // Map each provider to a parallel worker promise
+  const providerPromises = providers.map(async (prov) => {
     try {
       let slug = null;
       let searchedName = '';
@@ -245,7 +244,16 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
       // Try search names in order of priority
       for (const name of searchNames) {
         console.log(`[miColita Anime] [Scraper] Querying ${prov.name} for: "${name}"`);
-        slug = await findSlugInProvider(prov.service, name, prov.name);
+        
+        // Timeout individual search requests to 4s to ensure overall speed
+        slug = await Promise.race([
+          findSlugInProvider(prov.service, name, prov.name),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Search Timeout')), 4000))
+        ]).catch((err) => {
+          console.warn(`[miColita Anime] [Scraper] ${prov.name} search timed out or failed:`, err.message);
+          return null;
+        });
+
         if (slug) {
           searchedName = name;
           break;
@@ -268,7 +276,15 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
           episodeUrl = `https://jkanime.net/${slug}/${episodeNumber}/`;
         }
 
-        const links = await prov.service.getEpisodeLinks(episodeUrl);
+        // Fetch episode links with a 4s timeout
+        const links = await Promise.race([
+          prov.service.getEpisodeLinks(episodeUrl),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Links Timeout')), 4000))
+        ]).catch((err) => {
+          console.warn(`[miColita Anime] [Scraper] ${prov.name} links resolution timed out or failed:`, err.message);
+          return null;
+        });
+
         if (links && links.success && links.data) {
           const data = links.data;
           
@@ -277,6 +293,8 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
 
           console.log(`[miColita Anime] [Scraper] Successfully extracted ${subLinks.length} SUB and ${dubLinks.length} DUB servers from ${prov.name}`);
 
+          const localStreams = [];
+
           // Process SUB links (Jap sub Esp)
           subLinks.forEach((link) => {
             const cleanServer = link.server.toUpperCase();
@@ -284,22 +302,13 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
             
             if (!isUnstreamable) {
               const playDirectUrl = `${protocol}://${host}/play/direct?url=${encodeURIComponent(link.url)}&id=${cleanName(animeName)}_E${episodeNumber}_${cleanName(link.server)}`;
-              // 1. [NATIVO] Direct play redirect stream (plays inside Stremio)
-              streams.push({
+              localStreams.push({
                 name: `miColita\n${prov.name}`,
                 type: 'url',
                 title: `⭐ [NATIVO] [SUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Jap (Sub Esp)\n🎬 Reproducción nativa en reproductor interno\n⚡ Resolvedor inteligente de video en tiempo real`,
                 url: playDirectUrl
               });
             }
-
-            // 2. [EMBED] Standard redirect embed (opens in browser as backup)
-            streams.push({
-              name: `miColita\n${prov.name}`,
-              type: 'embed',
-              title: `🔗 [EMBED] [SUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Jap (Sub Esp)\n🌐 Abre en el navegador (Opción tradicional)`,
-              externalUrl: link.url
-            });
           });
 
           // Process DUB links (Spanish Dub / Audio Dual)
@@ -309,35 +318,33 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
 
             if (!isUnstreamable) {
               const playDirectUrl = `${protocol}://${host}/play/direct?url=${encodeURIComponent(link.url)}&id=${cleanName(animeName)}_E${episodeNumber}_${cleanName(link.server)}`;
-              // 1. [NATIVO] Direct play redirect stream (plays inside Stremio)
-              streams.push({
+              localStreams.push({
                 name: `miColita\n${prov.name}`,
                 type: 'url',
                 title: `⭐ [NATIVO] [DUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Español Latino/Castellano\n🎬 Reproducción nativa en reproductor interno\n⚡ Resolvedor inteligente de video en tiempo real`,
                 url: playDirectUrl
               });
             }
-
-            // 2. [EMBED] Standard redirect embed (opens in browser as backup)
-            streams.push({
-              name: `miColita\n${prov.name}`,
-              type: 'embed',
-              title: `🔗 [EMBED] [DUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Español Latino/Castellano\n🌐 Abre en el navegador (Opción tradicional)`,
-              externalUrl: link.url
-            });
           });
 
-          // Short-circuit cascade for massive speed
-          if (streams.length > 0) {
-            console.log(`[miColita Anime] [Scraper] Found ${streams.length} streams in ${prov.name}. Stopping provider cascade.`);
-            break;
-          }
+          return localStreams;
         }
       }
     } catch (err) {
       console.error(`[miColita Anime] [Scraper] Error in provider ${prov.name}:`, err.message);
     }
-  }
+    return [];
+  });
+
+  // Run all scrapers in parallel
+  const results = await Promise.allSettled(providerPromises);
+  const streams = [];
+
+  results.forEach((res) => {
+    if (res.status === 'fulfilled' && res.value) {
+      streams.push(...res.value);
+    }
+  });
 
   if (streams.length > 0) {
     streamCache.set(cacheKey, { data: streams, timestamp: now });
@@ -735,6 +742,24 @@ app.get('/manifest.json', (req, res) => {
   res.json(MANIFEST);
 });
 
+// Helper to construct a base64url-encoded proxy stream URL
+function getProxyUrl(directUrl, host, protocol) {
+  try {
+    const parsed = new URL(directUrl);
+    const lastSlash = parsed.pathname.lastIndexOf('/');
+    const dirPath = parsed.pathname.substring(0, lastSlash + 1);
+    const filename = parsed.pathname.substring(lastSlash + 1);
+    
+    const baseDirUrl = `${parsed.origin}${dirPath}`;
+    const encodedDir = Buffer.from(baseDirUrl).toString('base64url');
+    
+    const query = parsed.search;
+    return `${protocol}://${host}/play/proxy/${encodedDir}/${filename}${query}`;
+  } catch (e) {
+    return directUrl;
+  }
+}
+
 // Real-time redirect play route using the download.service.js resolveEmbedUrl function
 app.get('/play/direct', async (req, res) => {
   const { url, id } = req.query;
@@ -747,8 +772,19 @@ app.get('/play/direct', async (req, res) => {
   try {
     const directUrl = await resolveToDirectLink(url, url);
     if (directUrl) {
-      console.log(`[miColita Anime] [/play/direct] Redirecting to direct stream: ${directUrl.substring(0, 100)}...`);
-      return res.redirect(302, directUrl);
+      // Check if URL requires universal streaming proxy (VOE, YourUpload, etc.)
+      const isRestrictive = /cloudwindow-route|voe|yourupload/i.test(directUrl);
+      
+      if (isRestrictive) {
+        const host = req.get('host');
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const proxiedUrl = getProxyUrl(directUrl, host, protocol);
+        console.log(`[miColita Anime] [/play/direct] Redirecting VOE/YourUpload through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
+        return res.redirect(302, proxiedUrl);
+      } else {
+        console.log(`[miColita Anime] [/play/direct] Redirecting to direct stream (unrestricted): ${directUrl.substring(0, 100)}...`);
+        return res.redirect(302, directUrl);
+      }
     }
   } catch (err) {
     console.error(`[miColita Anime] [/play/direct] Failed resolving embed to direct link:`, err.message);
@@ -756,6 +792,53 @@ app.get('/play/direct', async (req, res) => {
 
   console.log(`[miColita Anime] [/play/direct] Redirecting to fallback external url: ${url}`);
   return res.redirect(302, url);
+});
+
+// Universal stream proxy to bypass IP/ASN/Referer restrictions on VOE and YourUpload
+app.get('/play/proxy/:encodedDir/*', async (req, res) => {
+  const { encodedDir } = req.params;
+  const filename = req.params[0];
+  
+  try {
+    const baseDirUrl = Buffer.from(encodedDir, 'base64url').toString('utf8');
+    const queryString = new URLSearchParams(req.query).toString();
+    const targetUrl = `${baseDirUrl}${filename}${queryString ? '?' + queryString : ''}`;
+    
+    console.log(`[miColita Anime] [Proxy] Proxying request to: ${targetUrl.substring(0, 100)}...`);
+    
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      ...(req.headers.range ? { 'Range': req.headers.range } : {})
+    };
+    
+    // Automatically apply referer based on target domain
+    if (targetUrl.includes('voe') || targetUrl.includes('cloudwindow-route.com')) {
+      headers['Referer'] = 'https://voe.sx/';
+    } else if (targetUrl.includes('yourupload')) {
+      headers['Referer'] = 'https://www.yourupload.com/';
+    } else if (targetUrl.includes('filemoon')) {
+      headers['Referer'] = 'https://filemoon.sx/';
+    }
+    
+    const response = await axios.get(targetUrl, {
+      headers,
+      responseType: 'stream',
+      timeout: 15000,
+    });
+    
+    // Forward relevant headers to support seeking
+    res.setHeader('Content-Type', response.headers['content-type'] || 'application/octet-stream');
+    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+    if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+    if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+    res.status(response.status);
+    
+    // Stream data
+    response.data.pipe(res);
+  } catch (err) {
+    console.error(`[miColita Anime] [Proxy] Error proxying stream:`, err.message);
+    res.status(500).send(`Error de proxy: ${err.message}`);
+  }
 });
 
 // Universal Stremio Stream Route supporting all prefixes
