@@ -43,7 +43,8 @@ function cleanName(name) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "") // remove accents
-    .replace(/[^a-z0-9\s]/g, "") // remove special chars
+    .replace(/[-_]/g, " ") // replace hyphens and underscores with spaces
+    .replace(/[^a-z0-9\s]/g, "") // remove other special chars
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -119,14 +120,16 @@ async function findSlugInProvider(service, animeName, providerName) {
         }
       }
 
-      // 3. Check token overlap (shares at least one significant word of length > 3)
-      const targetWords = targetClean.split(' ').filter(w => w.length > 3);
+      // 3. Check token overlap (shares at least 50% of significant non-stop words)
+      const STOP_WORDS = new Set(['in', 'of', 'the', 'a', 'to', 'and', 'for', 'at', 'by', 'an', 'el', 'la', 'de', 'con', 'un', 'del', 'los', 'las', 'y', 'o', 'u', 'en', 'para', 'por', 'que']);
+      const targetWords = targetClean.split(' ').filter(w => w && !STOP_WORDS.has(w));
       if (targetWords.length > 0) {
         for (const res of results) {
           const cleanResTitle = cleanName(res.title);
-          const resWords = cleanResTitle.split(' ').filter(w => w.length > 3);
-          const hasOverlap = targetWords.some(w => resWords.includes(w));
-          if (hasOverlap) {
+          const resWords = cleanResTitle.split(' ').filter(w => w && !STOP_WORDS.has(w));
+          const overlapCount = targetWords.filter(w => resWords.includes(w)).length;
+          const ratio = overlapCount / targetWords.length;
+          if (ratio >= 0.5) {
             return res.slug;
           }
         }
