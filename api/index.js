@@ -206,15 +206,18 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
           // Process SUB links (Jap sub Esp)
           subLinks.forEach((link) => {
             const cleanServer = link.server.toUpperCase();
-            const playDirectUrl = `${protocol}://${host}/play/direct?url=${encodeURIComponent(link.url)}&id=${cleanName(animeName)}_E${episodeNumber}_${cleanName(link.server)}`;
+            const isUnstreamable = /mega|1fichier/i.test(link.server);
             
-            // 1. [NATIVO] Direct play redirect stream (plays inside Stremio)
-            streams.push({
-              name: `miColita\n${prov.name}`,
-              type: 'url',
-              title: `⭐ [NATIVO] [SUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Jap (Sub Esp)\n🎬 Reproducción nativa en reproductor interno\n⚡ Resolvedor inteligente de video en tiempo real`,
-              url: playDirectUrl
-            });
+            if (!isUnstreamable) {
+              const playDirectUrl = `${protocol}://${host}/play/direct?url=${encodeURIComponent(link.url)}&id=${cleanName(animeName)}_E${episodeNumber}_${cleanName(link.server)}`;
+              // 1. [NATIVO] Direct play redirect stream (plays inside Stremio)
+              streams.push({
+                name: `miColita\n${prov.name}`,
+                type: 'url',
+                title: `⭐ [NATIVO] [SUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Jap (Sub Esp)\n🎬 Reproducción nativa en reproductor interno\n⚡ Resolvedor inteligente de video en tiempo real`,
+                url: playDirectUrl
+              });
+            }
 
             // 2. [EMBED] Standard redirect embed (opens in browser as backup)
             streams.push({
@@ -228,15 +231,18 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
           // Process DUB links (Spanish Dub / Audio Dual)
           dubLinks.forEach((link) => {
             const cleanServer = link.server.toUpperCase();
-            const playDirectUrl = `${protocol}://${host}/play/direct?url=${encodeURIComponent(link.url)}&id=${cleanName(animeName)}_E${episodeNumber}_${cleanName(link.server)}`;
+            const isUnstreamable = /mega|1fichier/i.test(link.server);
 
-            // 1. [NATIVO] Direct play redirect stream (plays inside Stremio)
-            streams.push({
-              name: `miColita\n${prov.name}`,
-              type: 'url',
-              title: `⭐ [NATIVO] [DUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Español Latino/Castellano\n🎬 Reproducción nativa en reproductor interno\n⚡ Resolvedor inteligente de video en tiempo real`,
-              url: playDirectUrl
-            });
+            if (!isUnstreamable) {
+              const playDirectUrl = `${protocol}://${host}/play/direct?url=${encodeURIComponent(link.url)}&id=${cleanName(animeName)}_E${episodeNumber}_${cleanName(link.server)}`;
+              // 1. [NATIVO] Direct play redirect stream (plays inside Stremio)
+              streams.push({
+                name: `miColita\n${prov.name}`,
+                type: 'url',
+                title: `⭐ [NATIVO] [DUB] ${cleanServer}\n📺 Cap. ${episodeNumber} • Audio: Español Latino/Castellano\n🎬 Reproducción nativa en reproductor interno\n⚡ Resolvedor inteligente de video en tiempo real`,
+                url: playDirectUrl
+              });
+            }
 
             // 2. [EMBED] Standard redirect embed (opens in browser as backup)
             streams.push({
