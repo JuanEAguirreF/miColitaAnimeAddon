@@ -163,6 +163,43 @@ async function resolveToDirectLink(id, embedUrl) {
   return null;
 }
 
+const kitsuTitlesCache = new Map();
+
+// Helper to fetch Romaji and alternative titles from Kitsu API
+async function getAlternativeTitlesFromKitsu(name) {
+  if (!name || typeof name !== 'string') return [];
+  
+  const cached = kitsuTitlesCache.get(name);
+  if (cached) {
+    return cached;
+  }
+  
+  try {
+    const url = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(name)}`;
+    console.log(`[miColita Anime] [Kitsu] Querying alternative titles for: "${name}"`);
+    const response = await axios.get(url, { timeout: 5000 });
+    
+    const titles = [];
+    if (response.data && response.data.data && response.data.data.length > 0) {
+      const item = response.data.data[0];
+      const attr = item.attributes || {};
+      
+      if (attr.canonicalTitle) titles.push(attr.canonicalTitle);
+      if (attr.titles) {
+        if (attr.titles.en_jp) titles.push(attr.titles.en_jp);
+        if (attr.titles.en) titles.push(attr.titles.en);
+      }
+      
+      const unique = [...new Set(titles)];
+      kitsuTitlesCache.set(name, unique);
+      return unique;
+    }
+  } catch (err) {
+    console.error(`[miColita Anime] [Kitsu] Error fetching Kitsu titles:`, err.message);
+  }
+  return [];
+}
+
 // Multi-provider cascade scraper execution
 async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
   const cacheKey = `${cleanName(animeName)}:${episodeNumber}`;
@@ -173,6 +210,19 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
     console.log(`[miColita Anime] [Cache] Streams for ${animeName} E${episodeNumber} loaded from cache.`);
     return cached.data;
   }
+
+  // 1. Resolve Romaji/Alternative titles from Kitsu
+  const searchNames = [animeName];
+  const kitsuNames = await getAlternativeTitlesFromKitsu(animeName);
+  if (kitsuNames && kitsuNames.length > 0) {
+    kitsuNames.forEach(name => {
+      if (!searchNames.includes(name)) {
+        searchNames.push(name);
+      }
+    });
+  }
+
+  console.log(`[miColita Anime] [Scraper] Attempting search with titles:`, searchNames);
 
   const providers = [
     { name: 'TioAnime', service: tioanimeService },
@@ -186,10 +236,21 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
 
   for (const prov of providers) {
     try {
-      console.log(`[miColita Anime] [Scraper] Querying ${prov.name} for: "${animeName}"`);
-      const slug = await findSlugInProvider(prov.service, animeName, prov.name);
+      let slug = null;
+      let searchedName = '';
+      
+      // Try search names in order of priority
+      for (const name of searchNames) {
+        console.log(`[miColita Anime] [Scraper] Querying ${prov.name} for: "${name}"`);
+        slug = await findSlugInProvider(prov.service, name, prov.name);
+        if (slug) {
+          searchedName = name;
+          break;
+        }
+      }
+
       if (slug) {
-        console.log(`[miColita Anime] [Scraper] Slug found in ${prov.name}: "${slug}". Resolving episode ${episodeNumber}...`);
+        console.log(`[miColita Anime] [Scraper] Slug found in ${prov.name}: "${slug}" (using "${searchedName}"). Resolving episode ${episodeNumber}...`);
 
         let episodeUrl = '';
         if (prov.name === 'TioAnime') {
