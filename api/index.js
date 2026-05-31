@@ -111,7 +111,7 @@ async function findSlugInProvider(service, animeName, providerName) {
         }
       }
 
-      // 2. Check fuzzy match
+      // 2. Check fuzzy match (includes)
       for (const res of results) {
         const cleanResTitle = cleanName(res.title);
         if (cleanResTitle.includes(targetClean) || targetClean.includes(cleanResTitle)) {
@@ -119,8 +119,18 @@ async function findSlugInProvider(service, animeName, providerName) {
         }
       }
 
-      // 3. Fallback to first result
-      return results[0].slug;
+      // 3. Check token overlap (shares at least one significant word of length > 3)
+      const targetWords = targetClean.split(' ').filter(w => w.length > 3);
+      if (targetWords.length > 0) {
+        for (const res of results) {
+          const cleanResTitle = cleanName(res.title);
+          const resWords = cleanResTitle.split(' ').filter(w => w.length > 3);
+          const hasOverlap = targetWords.some(w => resWords.includes(w));
+          if (hasOverlap) {
+            return res.slug;
+          }
+        }
+      }
     }
   } catch (err) {
     console.error(`[miColita Anime] [Scraper] Error searching slug in ${providerName}:`, err.message);

@@ -592,28 +592,102 @@ async function resolveFembedUrl(url, referer) {
   }
 }
 
+function rot13(text) {
+  return text.replace(/[a-zA-Z]/g, (c) => {
+    const code = c.charCodeAt(0);
+    const start = code <= 90 ? 65 : 97;
+    return String.fromCharCode(((code - start + 13) % 26) + start);
+  });
+}
+
+function replacePatterns(txt) {
+  const patterns = ['@$', '^^', '~@', '%?', '*~', '!!', '#&'];
+  let result = txt;
+  for (const pat of patterns) {
+    result = result.split(pat).join('');
+  }
+  return result;
+}
+
+function safeB64Decode(s) {
+  let padded = s;
+  const pad = s.length % 4;
+  if (pad) {
+    padded += '='.repeat(4 - pad);
+  }
+  try {
+    return Buffer.from(padded, 'base64').toString('utf8');
+  } catch (e) {
+    return '';
+  }
+}
+
+function shiftChars(text, shift) {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    out += String.fromCharCode(text.charCodeAt(i) - shift);
+  }
+  return out;
+}
+
+function reverseString(text) {
+  return text.split('').reverse().join('');
+}
+
+function deobfuscateVoeJson(rawJson) {
+  try {
+    const arr = JSON.parse(rawJson);
+    if (!Array.isArray(arr) || arr.length === 0 || typeof arr[0] !== 'string') {
+      return null;
+    }
+    const obf = arr[0];
+    const step1 = rot13(obf);
+    const step2 = replacePatterns(step1);
+    const step3 = safeB64Decode(step2);
+    if (!step3) return null;
+    const step4 = shiftChars(step3, 3);
+    const step5 = reverseString(step4);
+    const step6 = safeB64Decode(step5);
+    if (!step6) return null;
+    try {
+      return JSON.parse(step6);
+    } catch (e) {
+      return step6;
+    }
+  } catch (err) {
+    return null;
+  }
+}
+
 async function resolveVoeUrl(url, referer) {
   debugLog("VOE", "Resolving URL", url);
   try {
-    const { html, headers } = await fetchHtmlWithHeaders(url, referer);
+    let { html, headers } = await fetchHtmlWithHeaders(url, referer);
     debugLog("VOE", "Fetched HTML length", html.length);
 
-    // Check for redirect in page
+    // 1. Follow JS redirect if present
     const redirectMatch = html.match(/window\.location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/i);
     if (redirectMatch && redirectMatch[1]) {
       debugLog("VOE", "Following redirect to", redirectMatch[1]);
-      const redirectHtml = await fetchHtmlWithHeaders(redirectMatch[1], referer);
-      const extracted = findFirstUrl(redirectHtml.html, [
-        /sources?\s*:\s*\[\s*\{[^}]*src\s*:\s*["']([^"']+)["']/i,
-        /"file"\s*:\s*"([^"]+)"/i,
-        /(https?:\/\/[^\s"'<>]+\.(?:mp4|m3u8)[^\s"'<>]*)/i,
-      ]);
-      if (extracted) {
-        debugLog("VOE", "Found URL via redirect", extracted);
-        return extracted;
+      const redirectRes = await fetchHtmlWithHeaders(redirectMatch[1], referer);
+      html = redirectRes.html;
+    }
+
+    // 2. Try Method 8: Obfuscated JSON decryption
+    const jsonMatch = html.match(/<script type="application\/json">([\s\S]*?)<\/script>/);
+    if (jsonMatch && jsonMatch[1]) {
+      debugLog("VOE", "Found application/json block, deobfuscating...", null);
+      const decoded = deobfuscateVoeJson(jsonMatch[1].trim());
+      if (decoded && typeof decoded === 'object') {
+        const directUrl = decoded.source || decoded.direct_access_url;
+        if (directUrl) {
+          debugLog("VOE", "Decrypted direct stream URL successfully", null);
+          return directUrl;
+        }
       }
     }
 
+    // 3. Fallback: standard regex extractors
     const extracted = findFirstUrl(html, [
       /sources?\s*:\s*\[\s*\{[^}]*src\s*:\s*["']([^"']+)["']/i,
       /"file"\s*:\s*"([^"]+)"/i,
@@ -621,7 +695,7 @@ async function resolveVoeUrl(url, referer) {
     ]);
 
     if (extracted) {
-      debugLog("VOE", "Found URL", extracted);
+      debugLog("VOE", "Found URL via fallback regex", extracted);
       return extracted;
     }
 
