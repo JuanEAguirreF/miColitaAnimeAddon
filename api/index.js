@@ -760,6 +760,38 @@ function getProxyUrl(directUrl, host, protocol) {
   }
 }
 
+// Helper to resolve relative URLs against a base URL
+function resolveUrl(url, baseUrl) {
+  try {
+    return new URL(url, baseUrl).href;
+  } catch (e) {
+    return url;
+  }
+}
+
+// Helper to rewrite absolute and relative URLs inside an HLS .m3u8 playlist to use the proxy
+function rewritePlaylist(playlistText, baseDirUrl, host, protocol) {
+  const lines = playlistText.split('\n');
+  const rewrittenLines = lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+    if (trimmed.startsWith('#')) {
+      // Rewrite URIs in tags (like EXT-X-MAP or EXT-X-KEY)
+      return line.replace(/URI=["']([^"']+)["']/g, (match, url) => {
+        const absoluteUrl = resolveUrl(url, baseDirUrl);
+        const proxied = getProxyUrl(absoluteUrl, host, protocol);
+        return `URI="${proxied}"`;
+      });
+    } else {
+      // It is a segment or sub-playlist URL line
+      const absoluteUrl = resolveUrl(trimmed, baseDirUrl);
+      const proxied = getProxyUrl(absoluteUrl, host, protocol);
+      return proxied;
+    }
+  });
+  return rewrittenLines.join('\n');
+}
+
 // Real-time redirect play route using the download.service.js resolveEmbedUrl function
 app.get('/play/direct', async (req, res) => {
   const { url, id } = req.query;
@@ -772,14 +804,14 @@ app.get('/play/direct', async (req, res) => {
   try {
     const directUrl = await resolveToDirectLink(url, url);
     if (directUrl) {
-      // Check if URL requires universal streaming proxy (VOE, YourUpload, etc.)
-      const isRestrictive = /cloudwindow-route|voe|yourupload/i.test(directUrl);
+      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, etc.)
+      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks/i.test(directUrl);
       
       if (isRestrictive) {
         const host = req.get('host');
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const proxiedUrl = getProxyUrl(directUrl, host, protocol);
-        console.log(`[miColita Anime] [/play/direct] Redirecting VOE/YourUpload through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
+        console.log(`[miColita Anime] [/play/direct] Redirecting VOE/YourUpload/Zilla through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
         return res.redirect(302, proxiedUrl);
       } else {
         console.log(`[miColita Anime] [/play/direct] Redirecting to direct stream (unrestricted): ${directUrl.substring(0, 100)}...`);
@@ -794,7 +826,7 @@ app.get('/play/direct', async (req, res) => {
   return res.redirect(302, url);
 });
 
-// Universal stream proxy to bypass IP/ASN/Referer restrictions on VOE and YourUpload
+// Universal stream proxy to bypass IP/ASN/Referer and MIME type restrictions (VOE, YourUpload, Zilla)
 app.get('/play/proxy/:encodedDir/*', async (req, res) => {
   const { encodedDir } = req.params;
   const filename = req.params[0];
@@ -820,21 +852,49 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       headers['Referer'] = 'https://filemoon.sx/';
     }
     
-    const response = await axios.get(targetUrl, {
-      headers,
-      responseType: 'stream',
-      timeout: 15000,
-    });
+    const isPlaylist = filename.includes('.m3u8') || req.url.includes('.m3u8') || targetUrl.includes('/m3u8/') || targetUrl.includes('.m3u8');
     
-    // Forward relevant headers to support seeking
-    res.setHeader('Content-Type', response.headers['content-type'] || 'application/octet-stream');
-    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
-    if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
-    if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
-    res.status(response.status);
-    
-    // Stream data
-    response.data.pipe(res);
+    if (isPlaylist) {
+      // Fetch playlist as text to rewrite URLs inside it to use our proxy
+      const response = await axios.get(targetUrl, {
+        headers,
+        responseType: 'text',
+        timeout: 15000,
+      });
+      
+      const host = req.get('host');
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+      
+      const parsedTarget = new URL(targetUrl);
+      const lastSlash = parsedTarget.pathname.lastIndexOf('/');
+      const targetBaseDir = `${parsedTarget.origin}${parsedTarget.pathname.substring(0, lastSlash + 1)}`;
+      
+      const rewrittenBody = rewritePlaylist(response.data, targetBaseDir, host, protocol);
+      
+      res.setHeader('Content-Type', response.headers['content-type'] || 'application/vnd.apple.mpegurl');
+      return res.send(rewrittenBody);
+    } else {
+      // Fetch binary segments/files as stream
+      const response = await axios.get(targetUrl, {
+        headers,
+        responseType: 'stream',
+        timeout: 15000,
+      });
+      
+      let contentType = response.headers['content-type'] || 'application/octet-stream';
+      // Force correct video MIME type for Zilla .html fMP4 segments to prevent ExoPlayer crashes in Stremio
+      if (targetUrl.includes('zilla-networks.com') && targetUrl.includes('.html')) {
+        contentType = 'video/mp4';
+      }
+      
+      res.setHeader('Content-Type', contentType);
+      if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
+      if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
+      if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
+      res.status(response.status);
+      
+      return response.data.pipe(res);
+    }
   } catch (err) {
     console.error(`[miColita Anime] [Proxy] Error proxying stream:`, err.message);
     res.status(500).send(`Error de proxy: ${err.message}`);
