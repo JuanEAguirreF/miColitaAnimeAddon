@@ -897,10 +897,20 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       return res.send(rewrittenBody);
     } else {
       // Fetch binary segments/files as stream
+      const controller = new AbortController();
+      
+      req.on('close', () => {
+        if (!res.writableEnded) {
+          console.log(`[miColita Anime] [Proxy] Client closed connection. Aborting upstream request.`);
+          controller.abort();
+        }
+      });
+
       const response = await axios.get(targetUrl, {
         headers,
         responseType: 'stream',
         timeout: 15000,
+        signal: controller.signal
       });
       
       let contentType = response.headers['content-type'] || 'application/octet-stream';
@@ -918,8 +928,14 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       return response.data.pipe(res);
     }
   } catch (err) {
+    if (err.name === 'AbortError' || err.code === 'ERR_CANCELED' || axios.isCancel(err)) {
+      console.log(`[miColita Anime] [Proxy] Upstream request successfully aborted.`);
+      return;
+    }
     console.error(`[miColita Anime] [Proxy] Error proxying stream:`, err.message);
-    res.status(500).send(`Error de proxy: ${err.message}`);
+    if (!res.headersSent) {
+      res.status(500).send(`Error de proxy: ${err.message}`);
+    }
   }
 });
 
