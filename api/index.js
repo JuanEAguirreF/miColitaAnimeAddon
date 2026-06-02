@@ -820,7 +820,9 @@ app.get('/play/direct', async (req, res) => {
     const directUrl = await resolveToDirectLink(url, url);
     if (directUrl) {
       // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, etc.)
-      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish/i.test(directUrl) || directUrl.includes('kjhhiuahiuhgihdf');
+      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish/i.test(directUrl) || 
+                            directUrl.includes('kjhhiuahiuhgihdf') ||
+                            /voe|yourupload|streamwish|sfastwish|flaswish/i.test(url);
       
       if (isRestrictive) {
         const host = req.get('host');
@@ -875,7 +877,7 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       headers['Referer'] = 'https://www.yourupload.com/';
     } else if (targetUrl.includes('filemoon')) {
       headers['Referer'] = 'https://filemoon.sx/';
-    } else if (targetUrl.includes('kjhhiuahiuhgihdf') || /streamwish|sfastwish|flaswish/i.test(targetUrl)) {
+    } else if (targetUrl.includes('kjhhiuahiuhgihdf') || /streamwish|sfastwish|flaswish|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru/i.test(targetUrl)) {
       headers['Referer'] = 'https://sfastwish.com/';
     }
     
