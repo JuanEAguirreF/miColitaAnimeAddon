@@ -438,7 +438,7 @@ async function resolveStreamwishUrl(url, referer) {
             const links = linksSandbox.links;
             debugLog("Streamwish", "Extracted links: " + JSON.stringify(links), null);
             
-            const orderedKeys = ["hls4", "hls3", "hls2"];
+            const orderedKeys = ["hls2", "hls3", "hls4"];
             for (const key of orderedKeys) {
               let candidateUrl = links[key];
               if (candidateUrl && typeof candidateUrl === "string") {
