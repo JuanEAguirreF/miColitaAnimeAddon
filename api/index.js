@@ -848,7 +848,10 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
   
   try {
     const baseDirUrl = Buffer.from(encodedDir, 'base64url').toString('utf8');
-    const queryString = new URLSearchParams(req.query).toString();
+    
+    // Extract exact raw query string from req.originalUrl to prevent Express decoding/encoding issues
+    const queryIndex = req.originalUrl.indexOf('?');
+    const queryString = queryIndex !== -1 ? req.originalUrl.substring(queryIndex + 1) : '';
     
     // Revert .mp4 extension override back to .html for CDN requests (Zilla networks)
     let cdnFilename = filename;
