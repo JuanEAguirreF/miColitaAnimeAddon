@@ -10,67 +10,67 @@ async function testLive() {
   console.log('Test server listening on port 7099.');
 
   try {
-    // 1. Test Manifest
-    console.log('\nFetching manifest...');
-    const manifestRes = await axios.get('http://localhost:7099/manifest.json');
-    console.log('Manifest Name:', manifestRes.data.name);
-    console.log('Manifest Types:', manifestRes.data.types);
-
-    // 2. Test Stream List (Parallel Cascade & No Embeds)
-    // Farming Life in Another World Episode 8
-    console.log('\nFetching stream options for Farming Life in Another World E8...');
-    console.log('Executing parallel cascade across all scrapers (this may take up to 6 seconds)...');
+    // Test Zilla HLS Direct Play resolving and HLS proxying
+    console.log('\n--- Testing Zilla HLS Playback Fix ---');
+    const embedUrl = 'https://player.zilla-networks.com/play/c7b87de6d40c15bf4838b88efa430042';
+    const playDirectUrl = `http://localhost:7099/play/direct?url=${encodeURIComponent(embedUrl)}&id=test_zilla`;
     
-    const startTime = Date.now();
-    const streamRes = await axios.get('http://localhost:7099/stream/series/tt19223420:2:8.json');
-    const elapsed = Date.now() - startTime;
+    console.log(`1. Requesting direct play for Zilla embed: ${playDirectUrl}`);
+    const redirectRes = await axios.get(playDirectUrl, {
+      maxRedirects: 0,
+      validateStatus: (status) => status >= 300 && status < 400
+    });
     
-    console.log(`\n--- Query Completed in ${(elapsed / 1000).toFixed(2)}s ---`);
-    const streams = streamRes.data.streams || [];
-    console.log(`Found ${streams.length} total streams!`);
+    const proxiedM3u8Url = redirectRes.headers.location;
+    console.log(`   Redirected to proxy URL: ${proxiedM3u8Url}`);
     
-    const embeds = streams.filter(s => s.type === 'embed' || s.externalUrl);
-    const urls = streams.filter(s => s.type === 'url' || s.url);
-    
-    console.log(`Native Streams: ${urls.length}`);
-    console.log(`Embed (browser) Streams: ${embeds.length}`);
-    
-    if (embeds.length === 0) {
-      console.log('SUCCESS: Browser embed links have been successfully removed!');
+    if (proxiedM3u8Url.includes('/play/proxy/')) {
+      console.log('   SUCCESS: Zilla HLS redirected to universal proxy!');
     } else {
-      console.log('WARNING: Browser embed links are still present.');
+      console.log('   FAILURE: Did not redirect to proxy.');
     }
 
-    if (streams.length > 0) {
-      console.log('\nListing the first 5 stream options:');
-      streams.slice(0, 5).forEach((s, idx) => {
-        console.log(`\n${idx + 1}. Title: ${s.title.replace(/\n/g, ' | ')}`);
-        console.log(`   URL: ${s.url}`);
-      });
+    // Fetch the proxied m3u8 playlist to check rewriting
+    console.log(`\n2. Fetching the proxied HLS playlist to verify URL rewriting...`);
+    const playlistRes = await axios.get(proxiedM3u8Url);
+    console.log(`   Response Status: ${playlistRes.status}`);
+    console.log(`   Content-Type: ${playlistRes.headers['content-type']}`);
+    console.log(`   Playlist snippet (first 400 chars):\n`, playlistRes.data.substring(0, 400));
+
+    // Verify absolute URL was rewritten to proxy
+    if (playlistRes.data.includes('http://localhost:7099/play/proxy/')) {
+      console.log('   SUCCESS: Zilla HLS absolute URLs successfully rewritten to proxy!');
+    } else {
+      console.log('   FAILURE: Absolute URLs inside playlist were not rewritten.');
+    }
+
+    // Extract one rewritten segment URL
+    const lines = playlistRes.data.split('\n');
+    const segmentLine = lines.find(line => line.includes('/play/proxy/') && line.includes('init.html'));
+    
+    if (segmentLine) {
+      // Extract URL from URI="..." quotes
+      const match = segmentLine.match(/URI=["']([^"']+)["']/);
+      const segmentUrl = match ? match[1] : null;
       
-      // 3. Test Proxy Redirection for VOE/YourUpload
-      const voeStream = streams.find(s => s.title.includes('VOE') || s.url.includes('VOE'));
-      if (voeStream) {
-        console.log(`\nTesting proxy redirect for resolved VOE stream...`);
-        console.log(`Requesting: ${voeStream.url}`);
+      if (segmentUrl) {
+        console.log(`\n3. Fetching proxied segment to verify MIME type override: ${segmentUrl}`);
+        const segRes = await axios.get(segmentUrl, { timeout: 10000 });
+        console.log(`   Response Status: ${segRes.status}`);
+        console.log(`   Original Content-Type from Zilla: text/html`);
+        console.log(`   Proxied Content-Type (MIME type): ${segRes.headers['content-type']}`);
+        console.log(`   Content Length: ${segRes.data.length} bytes`);
         
-        // Fetch it and see where it redirects
-        const redirectRes = await axios.get(voeStream.url, {
-          maxRedirects: 0,
-          validateStatus: (status) => status >= 300 && status < 400
-        });
-        
-        const redirectLocation = redirectRes.headers.location;
-        console.log('Redirect Location:', redirectLocation);
-        
-        if (redirectLocation.includes('/play/proxy/')) {
-          console.log('SUCCESS: VOE stream correctly redirected through our universal proxy!');
+        if (segRes.headers['content-type'] === 'video/mp4') {
+          console.log('   SUCCESS: Zilla fMP4 segment Content-Type successfully overridden to video/mp4!');
         } else {
-          console.log('FAILURE: VOE stream did not redirect to the proxy.');
+          console.log('   FAILURE: Content-Type was not overridden.');
         }
+      } else {
+        console.log('   WARNING: Could not parse URL from URI tag.');
       }
     } else {
-      console.log('No streams found. Maybe Kitsu API or providers are down?');
+      console.log('   WARNING: Could not find rewritten segment URL in playlist.');
     }
 
   } catch (e) {
