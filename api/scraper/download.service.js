@@ -550,27 +550,68 @@ async function resolveStreamwishUrl(url, referer) {
 
 async function resolveStreamtapeUrl(url, referer) {
   debugLog("Streamtape", "Resolving URL", url);
-  const { html, headers } = await fetchHtmlWithHeaders(url, referer);
-  debugLog("Streamtape", "Fetched HTML length", html.length);
-  debugLog("Streamtape", "Content-Type", headers["content-type"]);
+  try {
+    const { html, headers } = await fetchHtmlWithHeaders(url, referer);
+    debugLog("Streamtape", "Fetched HTML length", html.length);
+    debugLog("Streamtape", "Content-Type", headers["content-type"]);
 
-  const extracted = findFirstUrl(html, [
-    /(https?:\/\/[^\s"']*streamtape\.com\/get_video[^\s"']*)/i,
-    /(https?:\/\/[^\s"']*streamtape\.com\/ab-get-video[^\s"']*)/i,
-    /videolink[^\n]+?href=["']([^"']+)["']/i,
-    /(https?:\/\/[^\s"']+\.mp4[^\s"']*)/i,
-    /"file"\s*:\s*"([^"]+)"/i,
-    /player\.config\s*=\s*\{[^}]*file\s*:\s*["']([^"']+)["']/i,
-    /"video_link"\s*:\s*"([^"]+)"/i,
-  ]);
+    // 1. Try to find the dynamic robotlink script and evaluate it in vm
+    const robotMatch = html.match(/document\.getElementById\(['"]robotlink['"]\)\.innerHTML\s*=\s*([^\n;]+)/i);
+    if (robotMatch) {
+      debugLog("Streamtape", "Found robotlink assignment in script", null);
+      const expr = robotMatch[1];
+      const vm = require("node:vm");
+      const elements = {};
+      const sandbox = {
+        document: {
+          getElementById: (id) => {
+            if (!elements[id]) {
+              elements[id] = {
+                _val: '',
+                get innerHTML() { return this._val; },
+                set innerHTML(val) { this._val = val; }
+              };
+            }
+            return elements[id];
+          }
+        }
+      };
+      vm.createContext(sandbox);
+      vm.runInContext(`document.getElementById('robotlink').innerHTML = ${expr};`, sandbox);
+      let resolved = elements['robotlink'] ? elements['robotlink'].innerHTML : null;
+      if (resolved) {
+        if (resolved.startsWith('//')) {
+          resolved = 'https:' + resolved;
+        } else if (resolved.startsWith('/')) {
+          resolved = 'https:/' + resolved;
+        }
+        debugLog("Streamtape", "Successfully evaluated robotlink", resolved);
+        return resolved;
+      }
+    }
 
-  if (extracted) {
-    debugLog("Streamtape", "Found URL", extracted);
-    return extracted;
+    // 2. Fallback to existing static regex matches
+    const extracted = findFirstUrl(html, [
+      /(https?:\/\/[^\s"']*streamtape\.com\/get_video[^\s"']*)/i,
+      /(https?:\/\/[^\s"']*streamtape\.com\/ab-get-video[^\s"']*)/i,
+      /videolink[^\n]+?href=["']([^"']+)["']/i,
+      /(https?:\/\/[^\s"']+\.mp4[^\s"']*)/i,
+      /"file"\s*:\s*"([^"]+)"/i,
+      /player\.config\s*=\s*\{[^}]*file\s*:\s*["']([^"']+)["']/i,
+      /"video_link"\s*:\s*"([^"]+)"/i,
+    ]);
+
+    if (extracted) {
+      debugLog("Streamtape", "Found URL in fallback regex", extracted);
+      return extracted;
+    }
+
+    debugLog("Streamtape", "No URL resolved");
+    return null;
+  } catch (err) {
+    debugLog("Streamtape", "Error during resolution", err.message);
+    return null;
   }
-
-  debugLog("Streamtape", "No URL found in HTML");
-  return null;
 }
 
 async function resolveOneFichierUrl(url, referer) {
@@ -1046,15 +1087,21 @@ async function resolveEmbedUrl(url, record, candidate) {
   if (/streamwish|sfastwish|flaswish/i.test(host)) {
     debugLog("resolveEmbed", "Using Streamwish resolver", null);
     const resolved = await resolveStreamwishUrl(url, referer);
-    if (!resolved) throw new Error("No se pudo resolver enlace directo en Streamwish");
-    return resolved;
+    if (resolved) return resolved;
+    debugLog("resolveEmbed", "Streamwish fast resolver failed. Trying Puppeteer fallback...", null);
+    const puppeteerResolved = await resolveEmbedWithPuppeteer(url, referer);
+    if (puppeteerResolved) return puppeteerResolved;
+    throw new Error("No se pudo resolver enlace directo en Streamwish");
   }
 
   if (/streamtape/i.test(host)) {
     debugLog("resolveEmbed", "Using Streamtape resolver", null);
     const resolved = await resolveStreamtapeUrl(url, referer);
-    if (!resolved) throw new Error("No se pudo resolver enlace directo en Streamtape");
-    return resolved;
+    if (resolved) return resolved;
+    debugLog("resolveEmbed", "Streamtape fast resolver failed. Trying Puppeteer fallback...", null);
+    const puppeteerResolved = await resolveEmbedWithPuppeteer(url, referer);
+    if (puppeteerResolved) return puppeteerResolved;
+    throw new Error("No se pudo resolver enlace directo en Streamtape");
   }
 
   if (/1fichier/i.test(host)) {
