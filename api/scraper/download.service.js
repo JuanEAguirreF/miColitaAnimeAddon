@@ -51,6 +51,10 @@ async function resolveEmbedWithPuppeteer(url, referer) {
     page.on("request", (req) => {
       const rUrl = req.url();
       if (!interceptedUrl && (rUrl.includes('.m3u8') || rUrl.includes('.mp4')) && !rUrl.startsWith("blob:") && !rUrl.includes("blank")) {
+        // Exclude fake decoy playlists that consist of ad images (contains index-f or kjhhiuahiuhgihdf signature)
+        if (rUrl.includes('index-f') || rUrl.includes('kjhhiuahiuhgihdf')) {
+          return;
+        }
         interceptedUrl = rUrl;
       }
     });
@@ -1086,7 +1090,13 @@ async function resolveEmbedUrl(url, record, candidate) {
 
   if (/streamwish|sfastwish|flaswish/i.test(host)) {
     debugLog("resolveEmbed", "Using Streamwish resolver", null);
-    const resolved = await resolveStreamwishUrl(url, referer);
+    // Replace streamwish.to with sfastwish.com to bypass the JS skeleton spinner and get the direct packed HTML
+    let targetUrl = url;
+    if (host.includes("streamwish.to")) {
+      targetUrl = url.replace("streamwish.to", "sfastwish.com");
+      debugLog("resolveEmbed", `Rewrote streamwish.to to sfastwish.com: ${targetUrl}`, null);
+    }
+    const resolved = await resolveStreamwishUrl(targetUrl, referer);
     if (resolved) return resolved;
     debugLog("resolveEmbed", "Streamwish fast resolver failed. Trying Puppeteer fallback...", null);
     const puppeteerResolved = await resolveEmbedWithPuppeteer(url, referer);
