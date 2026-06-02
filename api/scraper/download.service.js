@@ -234,6 +234,11 @@ function getExtensionFromUrl(url) {
 function getRefererForUrl(url) {
   try {
     const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    // If the URL is for a video host domain, don't use it as referer (bypasses anti-hotlinking / referrer checks)
+    if (/streamwish|sfastwish|flaswish|streamtape|voe|yourupload|mixdrop|vidhide/i.test(host)) {
+      return "https://animeav1.com/";
+    }
     return `${parsed.origin}/`;
   } catch (_error) {
     return "https://animeav1.com/";
@@ -384,6 +389,117 @@ async function resolveStreamwishUrl(url, referer) {
   const { html, headers } = await fetchHtmlWithHeaders(url, referer);
   debugLog("Streamwish", "Fetched HTML length", html.length);
   debugLog("Streamwish", "Content-Type", headers["content-type"]);
+
+  // Try eval-based Packer extraction using node:vm sandbox
+  const vm = require("node:vm");
+  let startIndex = 0;
+  while (true) {
+    const remainingHtml = html.substring(startIndex);
+    const match = remainingHtml.match(/eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)/i);
+    if (!match) {
+      break;
+    }
+
+    const relativeEvalIndex = remainingHtml.indexOf(match[0]);
+    if (relativeEvalIndex === -1) {
+      break;
+    }
+
+    const evalIndex = startIndex + relativeEvalIndex;
+    const scriptEndIndex = html.indexOf("</script>", evalIndex);
+    if (scriptEndIndex === -1) {
+      break;
+    }
+
+    const packedScript = html.substring(evalIndex, scriptEndIndex).trim();
+    // Update startIndex to continue searching after this script tag in case of failure
+    startIndex = scriptEndIndex;
+
+    try {
+      let unpackedCode = null;
+      const context = {
+        eval: (code) => {
+          unpackedCode = code;
+        }
+      };
+      vm.createContext(context);
+      vm.runInContext(packedScript, context, { timeout: 2000 });
+      
+      if (unpackedCode) {
+        debugLog("Streamwish", "Unpacked script block, length: " + unpackedCode.length, null);
+        
+        // 1. Try to extract links object
+        const linksMatch = unpackedCode.match(/var\s+links\s*=\s*(\{[\s\S]*?\});/);
+        if (linksMatch) {
+          try {
+            const linksSandbox = {};
+            vm.createContext(linksSandbox);
+            vm.runInContext(`var links = ${linksMatch[1]};`, linksSandbox);
+            const links = linksSandbox.links;
+            debugLog("Streamwish", "Extracted links: " + JSON.stringify(links), null);
+            
+            const orderedKeys = ["hls4", "hls3", "hls2"];
+            for (const key of orderedKeys) {
+              let candidateUrl = links[key];
+              if (candidateUrl && typeof candidateUrl === "string") {
+                if (candidateUrl.startsWith("/")) {
+                  const parsed = new URL(url);
+                  candidateUrl = parsed.origin + candidateUrl;
+                }
+                if (isLikelyVideoUrl(candidateUrl) && !candidateUrl.startsWith("blob:")) {
+                  debugLog("Streamwish", `Found valid stream URL from links.${key}`, candidateUrl);
+                  return candidateUrl;
+                }
+              }
+            }
+          } catch (linksErr) {
+            debugLog("Streamwish", "Error evaluating links object", linksErr.message);
+          }
+        }
+
+        // 2. Fallback: extract absolute m3u8 URLs via regex
+        const m3u8Matches = unpackedCode.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/gi);
+        if (m3u8Matches) {
+          for (const candidate of m3u8Matches) {
+            if (isLikelyVideoUrl(candidate) && !candidate.startsWith("blob:")) {
+              debugLog("Streamwish", "Found absolute m3u8 in unpacked script", candidate);
+              return candidate;
+            }
+          }
+        }
+
+        // 3. Fallback: extract relative m3u8 URLs via regex
+        const relativeM3u8Matches = unpackedCode.match(/["']?(\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/gi);
+        if (relativeM3u8Matches) {
+          for (const matchStr of relativeM3u8Matches) {
+            const cleanPath = matchStr.replace(/["']/g, "");
+            const parsed = new URL(url);
+            const absoluteCandidate = parsed.origin + cleanPath;
+            if (isLikelyVideoUrl(absoluteCandidate)) {
+              debugLog("Streamwish", "Found relative m3u8 in unpacked script", absoluteCandidate);
+              return absoluteCandidate;
+            }
+          }
+        }
+        
+        // 4. Fallback: check file property
+        const fileMatch = unpackedCode.match(/["']?file["']?\s*:\s*["']([^"']+)["']/i);
+        if (fileMatch && fileMatch[1]) {
+          let candidate = fileMatch[1];
+          if (candidate.startsWith("/")) {
+            const parsed = new URL(url);
+            candidate = parsed.origin + candidate;
+          }
+          if (!candidate.startsWith("blob:")) {
+            debugLog("Streamwish", "Found file URL in unpacked script", candidate);
+            return candidate;
+          }
+        }
+      }
+    } catch (err) {
+      debugLog("Streamwish", "Error during VM unpacking block", err.message);
+    }
+  }
 
   // First try to find .m3u8 URL (HLS stream)
   const m3u8Match = html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);

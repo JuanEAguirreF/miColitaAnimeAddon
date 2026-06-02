@@ -35,3 +35,6 @@ inspect_turnstile.js
 test_resolver.js
 page.html
 screenshot*.png
+
+# Temporary scratch scripts
+scratch/
