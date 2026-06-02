@@ -298,11 +298,15 @@ function normalizeVariantKey(value) {
     return "SUB";
   }
 
-  if (normalized.includes("sub") || normalized.includes("jap") || normalized.includes("jp")) {
+  if (normalized.includes("sub") || normalized.includes("jap") || normalized.includes("jp") || normalized === "1") {
     return "SUB";
   }
 
-  return "DUB";
+  if (normalized.includes("dub") || normalized.includes("lat") || normalized.includes("esp") || normalized === "2") {
+    return "DUB";
+  }
+
+  return "SUB";
 }
 
 function tryDecodeBase64(value) {

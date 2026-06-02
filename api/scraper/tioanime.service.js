@@ -39,8 +39,9 @@ function normalizeToken(value) {
 function normalizeVariantKey(value) {
   const normalized = normalizeToken(value);
   if (!normalized) return "SUB";
-  if (normalized.includes("sub") || normalized.includes("jap") || normalized.includes("jp")) return "SUB";
-  return "DUB";
+  if (normalized.includes("sub") || normalized.includes("jap") || normalized.includes("jp") || normalized === "1") return "SUB";
+  if (normalized.includes("dub") || normalized.includes("lat") || normalized.includes("esp") || normalized === "2") return "DUB";
+  return "SUB";
 }
 
 function parseEpisodeNumberFromUrl(url) {

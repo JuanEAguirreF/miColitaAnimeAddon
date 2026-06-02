@@ -288,8 +288,16 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
         if (links && links.success && links.data) {
           const data = links.data;
           
-          const subLinks = data.streamLinks?.SUB || data.servers?.sub || [];
-          const dubLinks = data.streamLinks?.DUB || data.servers?.dub || [];
+          let subLinks = data.streamLinks?.SUB || data.servers?.sub || [];
+          let dubLinks = data.streamLinks?.DUB || data.servers?.dub || [];
+
+          // Detección dinámica de página doblada basada en el slug
+          const isDubbedSlug = /latino|doblaje|doblado|castellano|dub\b/i.test(slug);
+          if (isDubbedSlug) {
+            console.log(`[miColita Anime] [Slug Override] Detectado slug doblado "${slug}". Promoviendo todos los enlaces a DUB.`);
+            dubLinks = [...dubLinks, ...subLinks];
+            subLinks = [];
+          }
 
           console.log(`[miColita Anime] [Scraper] Successfully extracted ${subLinks.length} SUB and ${dubLinks.length} DUB servers from ${prov.name}`);
 
