@@ -160,7 +160,7 @@ async function searchAnime(query, domainCandidate) {
   }
 
   const domain = (domainCandidate || DEFAULT_DOMAIN).toString().trim();
-  const searchUrl = `https://${domain}/directorio?search=${encodeURIComponent(cleanQuery)}`;
+  const searchUrl = `https://${domain}/directorio?q=${encodeURIComponent(cleanQuery)}`;
   const html = await fetchHtml(searchUrl);
 
   const $ = cheerio.load(html);

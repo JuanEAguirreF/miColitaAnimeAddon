@@ -295,11 +295,16 @@ function normalizeVariantKey(value) {
     return "SUB";
   }
 
-  if (normalized.includes("sub") || normalized.includes("jp") || normalized.includes("jap")) {
+  // JKAnime specific language mapping: 1 is Subtitled, 2 is Dubbed/Latino
+  if (normalized === "1" || normalized.includes("sub") || normalized.includes("jp") || normalized.includes("jap")) {
     return "SUB";
   }
 
-  return "DUB";
+  if (normalized === "2" || normalized.includes("dub") || normalized.includes("lat") || normalized.includes("esp")) {
+    return "DUB";
+  }
+
+  return "SUB";
 }
 
 function parseSearchResultsFromHtml(html, domain) {
