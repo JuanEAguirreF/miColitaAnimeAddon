@@ -37,16 +37,16 @@ async function testLive() {
     console.log(`   Content-Type: ${playlistRes.headers['content-type']}`);
     console.log(`   Playlist snippet (first 400 chars):\n`, playlistRes.data.substring(0, 400));
 
-    // Verify absolute URL was rewritten to proxy
-    if (playlistRes.data.includes('http://localhost:7099/play/proxy/')) {
-      console.log('   SUCCESS: Zilla HLS absolute URLs successfully rewritten to proxy!');
+    // Verify absolute URL was rewritten to proxy and ends with .mp4
+    if (playlistRes.data.includes('http://localhost:7099/play/proxy/') && playlistRes.data.includes('init.mp4')) {
+      console.log('   SUCCESS: Zilla HLS absolute URLs successfully rewritten to proxy with .mp4 extension!');
     } else {
-      console.log('   FAILURE: Absolute URLs inside playlist were not rewritten.');
+      console.log('   FAILURE: Absolute URLs inside playlist were not rewritten or do not have .mp4.');
     }
 
     // Extract one rewritten segment URL
     const lines = playlistRes.data.split('\n');
-    const segmentLine = lines.find(line => line.includes('/play/proxy/') && line.includes('init.html'));
+    const segmentLine = lines.find(line => line.includes('/play/proxy/') && line.includes('init.mp4'));
     
     if (segmentLine) {
       // Extract URL from URI="..." quotes
