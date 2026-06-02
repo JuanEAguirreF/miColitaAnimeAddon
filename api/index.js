@@ -819,14 +819,14 @@ app.get('/play/direct', async (req, res) => {
   try {
     const directUrl = await resolveToDirectLink(url, url);
     if (directUrl) {
-      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, etc.)
-      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks/i.test(directUrl);
+      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, etc.)
+      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish/i.test(directUrl) || directUrl.includes('kjhhiuahiuhgihdf');
       
       if (isRestrictive) {
         const host = req.get('host');
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const proxiedUrl = getProxyUrl(directUrl, host, protocol);
-        console.log(`[miColita Anime] [/play/direct] Redirecting VOE/YourUpload/Zilla through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
+        console.log(`[miColita Anime] [/play/direct] Redirecting restrictive stream (VOE/YourUpload/Zilla/Streamwish) through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
         return res.redirect(302, proxiedUrl);
       } else {
         console.log(`[miColita Anime] [/play/direct] Redirecting to direct stream (unrestricted): ${directUrl.substring(0, 100)}...`);
@@ -875,6 +875,8 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       headers['Referer'] = 'https://www.yourupload.com/';
     } else if (targetUrl.includes('filemoon')) {
       headers['Referer'] = 'https://filemoon.sx/';
+    } else if (targetUrl.includes('kjhhiuahiuhgihdf') || /streamwish|sfastwish|flaswish/i.test(targetUrl)) {
+      headers['Referer'] = 'https://sfastwish.com/';
     }
     
     const isPlaylist = filename.includes('.m3u8') || req.url.includes('.m3u8') || targetUrl.includes('/m3u8/') || targetUrl.includes('.m3u8');
