@@ -893,7 +893,7 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       
       const rewrittenBody = rewritePlaylist(response.data, targetBaseDir, host, protocol);
       
-      res.setHeader('Content-Type', response.headers['content-type'] || 'application/vnd.apple.mpegurl');
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       return res.send(rewrittenBody);
     } else {
       // Fetch binary segments/files as stream
