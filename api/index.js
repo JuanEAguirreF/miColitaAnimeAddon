@@ -779,13 +779,20 @@ function rewritePlaylist(playlistText, baseDirUrl, host, protocol) {
       // Rewrite URIs in tags (like EXT-X-MAP or EXT-X-KEY)
       return line.replace(/URI=["']([^"']+)["']/g, (match, url) => {
         const absoluteUrl = resolveUrl(url, baseDirUrl);
-        const proxied = getProxyUrl(absoluteUrl, host, protocol);
+        let proxied = getProxyUrl(absoluteUrl, host, protocol);
+        // Replace .html extension with .mp4 to bypass ExoPlayer extension/MIME strict checks
+        if (absoluteUrl.includes('.html')) {
+          proxied = proxied.replace(/\.html(\?|$)/, '.mp4$1');
+        }
         return `URI="${proxied}"`;
       });
     } else {
       // It is a segment or sub-playlist URL line
       const absoluteUrl = resolveUrl(trimmed, baseDirUrl);
-      const proxied = getProxyUrl(absoluteUrl, host, protocol);
+      let proxied = getProxyUrl(absoluteUrl, host, protocol);
+      if (absoluteUrl.includes('.html')) {
+        proxied = proxied.replace(/\.html(\?|$)/, '.mp4$1');
+      }
       return proxied;
     }
   });
@@ -829,12 +836,19 @@ app.get('/play/direct', async (req, res) => {
 // Universal stream proxy to bypass IP/ASN/Referer and MIME type restrictions (VOE, YourUpload, Zilla)
 app.get('/play/proxy/:encodedDir/*', async (req, res) => {
   const { encodedDir } = req.params;
-  const filename = req.params[0];
+  let filename = req.params[0];
   
   try {
     const baseDirUrl = Buffer.from(encodedDir, 'base64url').toString('utf8');
     const queryString = new URLSearchParams(req.query).toString();
-    const targetUrl = `${baseDirUrl}${filename}${queryString ? '?' + queryString : ''}`;
+    
+    // Revert .mp4 extension override back to .html for CDN requests (Zilla networks)
+    let cdnFilename = filename;
+    if (baseDirUrl.includes('zilla-networks.com') && filename.includes('.mp4')) {
+      cdnFilename = filename.replace(/\.mp4(\?|$)/, '.html$1');
+    }
+    
+    const targetUrl = `${baseDirUrl}${cdnFilename}${queryString ? '?' + queryString : ''}`;
     
     console.log(`[miColita Anime] [Proxy] Proxying request to: ${targetUrl.substring(0, 100)}...`);
     
