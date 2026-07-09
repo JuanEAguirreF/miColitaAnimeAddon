@@ -2,6 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const path = require('path');
+const http = require('http');
+const https = require('https');
+const { PassThrough } = require('stream');
 
 // Scraper services
 const { resolveEmbedUrl } = require('./scraper/download.service');
@@ -10,6 +13,21 @@ const animeflvService = require('./scraper/animeflv.service');
 const animeav1Service = require('./scraper/animeav1.service');
 const monoschinosService = require('./scraper/monoschinos.service');
 const jkanimeService = require('./scraper/jkanime.service');
+const tokianimeService = require('./scraper/tokianime.service');
+
+// Persistent HTTP/HTTPS Keep-Alive Agents to boost chunk downloading speed
+const keepAliveAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 100,
+  maxFreeSockets: 10,
+  timeout: 60000,
+});
+const keepAliveHttpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 100,
+  maxFreeSockets: 10,
+  timeout: 60000,
+});
 
 const app = express();
 app.use(cors());
@@ -228,6 +246,7 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
   console.log(`[miColita Anime] [Scraper] Attempting search with titles:`, searchNames);
 
   const providers = [
+    { name: 'TokiAnime', service: tokianimeService },
     { name: 'TioAnime', service: tioanimeService },
     { name: 'AnimeFLV', service: animeflvService },
     { name: 'AnimeAV1', service: animeav1Service },
@@ -264,7 +283,9 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
         console.log(`[miColita Anime] [Scraper] Slug found in ${prov.name}: "${slug}" (using "${searchedName}"). Resolving episode ${episodeNumber}...`);
 
         let episodeUrl = '';
-        if (prov.name === 'TioAnime') {
+        if (prov.name === 'TokiAnime') {
+          episodeUrl = `https://tokianime.tv/watch/${slug}/${episodeNumber}`;
+        } else if (prov.name === 'TioAnime') {
           episodeUrl = `https://tioanime.com/ver/${slug}-${episodeNumber}`;
         } else if (prov.name === 'AnimeFLV') {
           episodeUrl = `https://animeflv.net/ver/${slug}-${episodeNumber}`;
@@ -819,16 +840,16 @@ app.get('/play/direct', async (req, res) => {
   try {
     const directUrl = await resolveToDirectLink(url, url);
     if (directUrl) {
-      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, etc.)
-      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish/i.test(directUrl) || 
+      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, TokiAnime, etc.)
+      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish|tokianime/i.test(directUrl) || 
                             directUrl.includes('kjhhiuahiuhgihdf') ||
-                            /voe|yourupload|streamwish|sfastwish|flaswish/i.test(url);
+                            /voe|yourupload|streamwish|sfastwish|flaswish|tokianime/i.test(url);
       
       if (isRestrictive) {
         const host = req.get('host');
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const proxiedUrl = getProxyUrl(directUrl, host, protocol);
-        console.log(`[miColita Anime] [/play/direct] Redirecting restrictive stream (VOE/YourUpload/Zilla/Streamwish) through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
+        console.log(`[miColita Anime] [/play/direct] Redirecting restrictive stream (VOE/YourUpload/Zilla/Streamwish/TokiAnime) through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
         return res.redirect(302, proxiedUrl);
       } else {
         console.log(`[miColita Anime] [/play/direct] Redirecting to direct stream (unrestricted): ${directUrl.substring(0, 100)}...`);
@@ -879,9 +900,15 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       headers['Referer'] = 'https://filemoon.sx/';
     } else if (targetUrl.includes('kjhhiuahiuhgihdf') || /streamwish|sfastwish|flaswish|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru/i.test(targetUrl)) {
       headers['Referer'] = 'https://sfastwish.com/';
+    } else if (targetUrl.includes('tokianime.tv')) {
+      headers['Referer'] = 'https://tokianime.tv/';
     }
     
-    const isPlaylist = filename.includes('.m3u8') || req.url.includes('.m3u8') || targetUrl.includes('/m3u8/') || targetUrl.includes('.m3u8');
+    const isPlaylist = filename.includes('.m3u8') || 
+                       req.url.includes('.m3u8') || 
+                       targetUrl.includes('/m3u8/') || 
+                       targetUrl.includes('.m3u8') ||
+                       targetUrl.includes('mode=play');
     
     if (isPlaylist) {
       // Fetch playlist as text to rewrite URLs inside it to use our proxy
@@ -889,6 +916,8 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
         headers,
         responseType: 'text',
         timeout: 15000,
+        httpAgent: keepAliveHttpAgent,
+        httpsAgent: keepAliveAgent
       });
       
       const host = req.get('host');
@@ -905,11 +934,13 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
     } else {
       // Fetch binary segments/files as stream
       const controller = new AbortController();
+      const bufferStream = new PassThrough({ highWaterMark: 1024 * 1024 }); // 1MB Memory Buffer for smoother playback
       
       req.on('close', () => {
         if (!res.writableEnded) {
           console.log(`[miColita Anime] [Proxy] Client closed connection. Aborting upstream request.`);
           controller.abort();
+          bufferStream.destroy();
         }
       });
 
@@ -917,7 +948,9 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
         headers,
         responseType: 'stream',
         timeout: 15000,
-        signal: controller.signal
+        signal: controller.signal,
+        httpAgent: keepAliveHttpAgent,
+        httpsAgent: keepAliveAgent
       });
       
       let contentType = response.headers['content-type'] || 'application/octet-stream';
@@ -926,13 +959,15 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
         contentType = 'video/mp4';
       }
       
+      // Cache-Control headers for media segments to optimize player-side buffering
+      res.setHeader('Cache-Control', 'public, max-age=3600');
       res.setHeader('Content-Type', contentType);
       if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length']);
       if (response.headers['accept-ranges']) res.setHeader('Accept-Ranges', response.headers['accept-ranges']);
       if (response.headers['content-range']) res.setHeader('Content-Range', response.headers['content-range']);
       res.status(response.status);
       
-      return response.data.pipe(res);
+      return response.data.pipe(bufferStream).pipe(res);
     }
   } catch (err) {
     if (err.name === 'AbortError' || err.code === 'ERR_CANCELED' || axios.isCancel(err)) {
