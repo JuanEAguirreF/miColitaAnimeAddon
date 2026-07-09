@@ -14,6 +14,7 @@ const animeav1Service = require('./scraper/animeav1.service');
 const monoschinosService = require('./scraper/monoschinos.service');
 const jkanimeService = require('./scraper/jkanime.service');
 const tokianimeService = require('./scraper/tokianime.service');
+const gnulahdService = require('./scraper/gnulahd.service');
 
 // Persistent HTTP/HTTPS Keep-Alive Agents to boost chunk downloading speed
 const keepAliveAgent = new https.Agent({
@@ -83,10 +84,26 @@ async function getAnimeMeta(id, type) {
       const cleanKitsuId = id.replace('kitsu:', '');
       const url = `https://anime-kitsu.strem.fun/meta/anime/kitsu:${cleanKitsuId}.json`;
       console.log(`[miColita Anime] [Meta] Fetching Kitsu metadata from: ${url}`);
-      const response = await axios.get(url, { timeout: 10000 });
-      if (response.data && response.data.meta) {
-        metaCache.set(cacheKey, { data: response.data.meta, timestamp: now });
-        return response.data.meta;
+      try {
+        const response = await axios.get(url, { timeout: 10000 });
+        if (response.data && response.data.meta) {
+          metaCache.set(cacheKey, { data: response.data.meta, timestamp: now });
+          return response.data.meta;
+        }
+      } catch (err) {
+        console.warn(`[miColita Anime] [Meta] Failed fetching from Kitsu community API: ${err.message}. Invoking official Kitsu API fallback...`);
+        const officialUrl = `https://kitsu.io/api/edge/anime/${cleanKitsuId}`;
+        const response = await axios.get(officialUrl, { timeout: 10000 });
+        if (response.data && response.data.data && response.data.data.attributes) {
+          const attr = response.data.data.attributes;
+          const metaObj = {
+            name: attr.canonicalTitle || attr.titles.en_jp || attr.titles.en,
+            genres: attr.genres || []
+          };
+          console.log(`[miColita Anime] [Meta] Official Kitsu API Fallback resolved title: "${metaObj.name}"`);
+          metaCache.set(cacheKey, { data: metaObj, timestamp: now });
+          return metaObj;
+        }
       }
     } else if (id.startsWith('tt')) {
       // IMDb ID
@@ -246,6 +263,7 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
   console.log(`[miColita Anime] [Scraper] Attempting search with titles:`, searchNames);
 
   const providers = [
+    { name: 'GnulaHD', service: gnulahdService },
     { name: 'TokiAnime', service: tokianimeService },
     { name: 'TioAnime', service: tioanimeService },
     { name: 'AnimeFLV', service: animeflvService },
@@ -283,7 +301,14 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
         console.log(`[miColita Anime] [Scraper] Slug found in ${prov.name}: "${slug}" (using "${searchedName}"). Resolving episode ${episodeNumber}...`);
 
         let episodeUrl = '';
-        if (prov.name === 'TokiAnime') {
+        if (prov.name === 'GnulaHD') {
+          if (!episodeNumber || episodeNumber === 0) {
+            episodeUrl = `https://ww3.gnulahd.nu/ver/${slug}/`;
+          } else {
+            const paddedEp = String(episodeNumber).padStart(2, '0');
+            episodeUrl = `https://ww3.gnulahd.nu/${slug}-1x${paddedEp}/`;
+          }
+        } else if (prov.name === 'TokiAnime') {
           episodeUrl = `https://tokianime.tv/watch/${slug}/${episodeNumber}`;
         } else if (prov.name === 'TioAnime') {
           episodeUrl = `https://tioanime.com/ver/${slug}-${episodeNumber}`;
@@ -840,16 +865,16 @@ app.get('/play/direct', async (req, res) => {
   try {
     const directUrl = await resolveToDirectLink(url, url);
     if (directUrl) {
-      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, TokiAnime, etc.)
-      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish|tokianime/i.test(directUrl) || 
+      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, TokiAnime, GnulaHD, etc.)
+      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube/i.test(directUrl) || 
                             directUrl.includes('kjhhiuahiuhgihdf') ||
-                            /voe|yourupload|streamwish|sfastwish|flaswish|tokianime/i.test(url);
+                            /voe|yourupload|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube/i.test(url);
       
       if (isRestrictive) {
         const host = req.get('host');
         const protocol = req.headers['x-forwarded-proto'] || req.protocol;
         const proxiedUrl = getProxyUrl(directUrl, host, protocol);
-        console.log(`[miColita Anime] [/play/direct] Redirecting restrictive stream (VOE/YourUpload/Zilla/Streamwish/TokiAnime) through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
+        console.log(`[miColita Anime] [/play/direct] Redirecting restrictive stream (VOE/YourUpload/Zilla/Streamwish/TokiAnime/GnulaHD) through universal proxy: ${proxiedUrl.substring(0, 100)}...`);
         return res.redirect(302, proxiedUrl);
       } else {
         console.log(`[miColita Anime] [/play/direct] Redirecting to direct stream (unrestricted): ${directUrl.substring(0, 100)}...`);
@@ -902,6 +927,8 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       headers['Referer'] = 'https://sfastwish.com/';
     } else if (targetUrl.includes('tokianime.tv')) {
       headers['Referer'] = 'https://tokianime.tv/';
+    } else if (targetUrl.includes('they.tube') || targetUrl.includes('gnulahd.nu')) {
+      headers['Referer'] = 'https://ww3.gnulahd.nu/';
     }
     
     const isPlaylist = filename.includes('.m3u8') || 

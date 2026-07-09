@@ -72,12 +72,17 @@ async function getEpisodeLinks(episodeUrl) {
     
     const html = res.data;
     const match = html.match(/var\s+_gnpv_ep_langs\s*=\s*(\[[\s\S]*?\]);/i);
+    const authMatch = html.match(/AUTH\s*=\s*['"]&t=([^'"]+)['"]/i);
+    const authToken = authMatch ? authMatch[1] : '';
     
     const subLinks = [];
     const dubLinks = [];
     
     if (match) {
       const langs = JSON.parse(match[1]);
+      
+      // Parallelize TheyTube resolution calls to keep speed ultra-fast
+      const resolvePromises = [];
       
       langs.forEach(lang => {
         const isDub = lang.label === 'Latino' || lang.label === 'Castellano' || lang.flag === 'MX' || lang.flag === 'ES';
@@ -86,10 +91,43 @@ async function getEpisodeLinks(episodeUrl) {
         lang.servers.forEach(s => {
           let serverName = s.title;
           
+          if (s.src.includes('they.tube') && authToken) {
+            const code = s.src.split('/').pop().replace('.html', '');
+            if (code) {
+              const resolveUrl = `https://${DEFAULT_DOMAIN}/panel/the-tube-resolve.php?code=${code}&t=${authToken}`;
+              
+              // We add a parallel resolver promise
+              const p = axios.get(resolveUrl, {
+                headers: { ...HTTP_HEADERS, 'Referer': episodeUrl },
+                timeout: 5000
+              }).then(resolveRes => {
+                if (resolveRes.data && resolveRes.data.master) {
+                  targetList.push({
+                    server: `THEYTUBE (DIRECT) (${lang.label.toUpperCase()})`,
+                    url: resolveRes.data.master
+                  });
+                } else {
+                  // Fallback to original embed URL
+                  targetList.push({
+                    server: `THEYTUBE (${lang.label.toUpperCase()})`,
+                    url: s.src
+                  });
+                }
+              }).catch(err => {
+                // Fallback to original embed URL on error
+                targetList.push({
+                  server: `THEYTUBE (${lang.label.toUpperCase()})`,
+                  url: s.src
+                });
+              });
+              resolvePromises.push(p);
+              return;
+            }
+          }
+          
           // Normalize server names
           if (s.src.includes('voe')) serverName = 'VOE';
           else if (s.src.includes('ok.ru')) serverName = 'OKRU';
-          else if (s.src.includes('they.tube')) serverName = 'THEYTUBE';
           else if (s.src.includes('bysevepoin') || s.src.includes('streamwish') || s.src.includes('sfastwish')) serverName = 'STREAMWISH';
           else if (s.src.includes('vidsonic')) serverName = 'VIDSONIC';
           else if (s.src.includes('streamtape')) serverName = 'STREAMTAPE';
@@ -100,6 +138,11 @@ async function getEpisodeLinks(episodeUrl) {
           });
         });
       });
+      
+      // Wait for all TheyTube pre-resolution calls to finish (max 5s timeout)
+      if (resolvePromises.length > 0) {
+        await Promise.allSettled(resolvePromises);
+      }
     }
     
     return {
