@@ -868,7 +868,7 @@ app.get('/play/direct', async (req, res) => {
       // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, TokiAnime, GnulaHD, etc.)
       const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube/i.test(directUrl) || 
                             directUrl.includes('kjhhiuahiuhgihdf') ||
-                            /voe|yourupload|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube/i.test(url);
+                            (/voe|yourupload|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube/i.test(url) && !directUrl.includes('mp4upload'));
       
       if (isRestrictive) {
         const host = req.get('host');
@@ -929,6 +929,8 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       headers['Referer'] = 'https://tokianime.tv/';
     } else if (targetUrl.includes('they.tube') || targetUrl.includes('gnulahd.nu')) {
       headers['Referer'] = 'https://ww3.gnulahd.nu/';
+    } else if (targetUrl.includes('mp4upload')) {
+      headers['Referer'] = 'https://www.mp4upload.com/';
     }
     
     const isPlaylist = filename.includes('.m3u8') || 

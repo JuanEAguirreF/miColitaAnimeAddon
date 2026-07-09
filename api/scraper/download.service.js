@@ -675,6 +675,39 @@ async function resolveOneFichierUrl(url, referer) {
   }
 }
 
+async function resolveMp4UploadUrl(url, referer) {
+  debugLog("Mp4Upload", "Resolving URL", url);
+  try {
+    const res = await axios.get(url, {
+      headers: {
+        "User-Agent": HTML_HEADERS["User-Agent"],
+        "Referer": referer || "https://tokianime.tv/"
+      },
+      timeout: 8000
+    });
+    
+    const match = res.data.match(/src\s*:\s*["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i);
+    if (match && match[1]) {
+      const directUrl = match[1].trim();
+      debugLog("Mp4Upload", "Successfully resolved mp4upload direct URL", directUrl);
+      return directUrl;
+    }
+    
+    const match2 = res.data.match(/(https?:\/\/[^\s"'>]+\.mp4[^\s"'>]*)/i);
+    if (match2 && match2[1]) {
+      const directUrl = match2[1].trim();
+      debugLog("Mp4Upload", "Successfully resolved mp4upload direct URL (pattern 2)", directUrl);
+      return directUrl;
+    }
+    
+    debugLog("Mp4Upload", "No mp4 URL found in HTML content");
+    return null;
+  } catch (err) {
+    debugLog("Mp4Upload", "Error resolving", err.message);
+    return null;
+  }
+}
+
 async function resolveYourUploadUrl(url, referer) {
   debugLog("YourUpload", "Resolving URL", url);
   try {
@@ -1068,6 +1101,16 @@ async function resolveEmbedUrl(url, record, candidate) {
 
   debugLog("resolveEmbed", `Host: ${host}, Path: ${pathname}`, url);
 
+  // 0. WRAPPED MP4UPLOAD EMBEDS
+  if (host.includes("tokianime.tv") && pathname.includes("/mp4upload")) {
+    const embedParam = parsed.searchParams.get("embed");
+    if (embedParam) {
+      debugLog("resolveEmbed", `Extracting mp4upload embed from tokianime url: ${embedParam}`, null);
+      const resolved = await resolveMp4UploadUrl(embedParam, url);
+      if (resolved) return resolved;
+    }
+  }
+
   // 1. SPECIFIC DOMAIN RESOLVERS FIRST
   if (host.includes("zilla-networks.com") && pathname.startsWith("/play/")) {
     debugLog("resolveEmbed", "Using Zilla-Networks resolver", null);
@@ -1126,6 +1169,16 @@ async function resolveEmbedUrl(url, record, candidate) {
     const resolved = await resolveYourUploadUrl(url, referer);
     if (!resolved) throw new Error("No se pudo resolver enlace directo en YourUpload");
     return resolved;
+  }
+
+  if (/mp4upload/i.test(host)) {
+    debugLog("resolveEmbed", "Using Mp4Upload resolver", null);
+    const resolved = await resolveMp4UploadUrl(url, referer);
+    if (resolved) return resolved;
+    debugLog("resolveEmbed", "Mp4Upload fast resolver failed. Trying Puppeteer fallback...", null);
+    const puppeteerResolved = await resolveEmbedWithPuppeteer(url, referer);
+    if (puppeteerResolved) return puppeteerResolved;
+    throw new Error("No se pudo resolver enlace directo en Mp4Upload");
   }
 
   if (/ok\.ru|okru/i.test(host)) {
