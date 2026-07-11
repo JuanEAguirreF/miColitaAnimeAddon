@@ -400,11 +400,34 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
     }
   });
 
-  if (streams.length > 0) {
-    streamCache.set(cacheKey, { data: streams, timestamp: now });
+  // Sort streams prioritizing GnulaHD Latino, then GnulaHD Castellano, then other Dubs, then Subs
+  const sortedStreams = [...streams].sort((a, b) => {
+    const getScore = (s) => {
+      const title = (s.title || '').toUpperCase();
+      const name = (s.name || '').toUpperCase();
+      
+      if (name.includes('GNULA') && title.includes('LATINO')) {
+        return 100;
+      }
+      if (name.includes('GNULA') && title.includes('CASTELLANO')) {
+        return 90;
+      }
+      if (title.includes('LATINO')) {
+        return 80;
+      }
+      if (title.includes('CASTELLANO')) {
+        return 70;
+      }
+      return 0;
+    };
+    return getScore(b) - getScore(a);
+  });
+
+  if (sortedStreams.length > 0) {
+    streamCache.set(cacheKey, { data: sortedStreams, timestamp: now });
   }
 
-  return streams;
+  return sortedStreams;
 }
 
 // Landing page generator with Premium Anime aesthetics
