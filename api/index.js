@@ -15,6 +15,7 @@ const monoschinosService = require('./scraper/monoschinos.service');
 const jkanimeService = require('./scraper/jkanime.service');
 const tokianimeService = require('./scraper/tokianime.service');
 const gnulahdService = require('./scraper/gnulahd.service');
+const veranimeonlineService = require('./scraper/veranimeonline.service');
 
 // Persistent HTTP/HTTPS Keep-Alive Agents to boost chunk downloading speed
 const keepAliveAgent = new https.Agent({
@@ -265,6 +266,7 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
   const providers = [
     { name: 'GnulaHD', service: gnulahdService },
     { name: 'TokiAnime', service: tokianimeService },
+    { name: 'VerAnimeOnline', service: veranimeonlineService },
     { name: 'TioAnime', service: tioanimeService },
     { name: 'AnimeFLV', service: animeflvService },
     { name: 'AnimeAV1', service: animeav1Service },
@@ -308,6 +310,8 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
             const paddedEp = String(episodeNumber).padStart(2, '0');
             episodeUrl = `https://ww3.gnulahd.nu/${slug}-1x${paddedEp}/`;
           }
+        } else if (prov.name === 'VerAnimeOnline') {
+          episodeUrl = `https://veranimeonline.co/episodio/${slug}-episodio-${episodeNumber}/`;
         } else if (prov.name === 'TokiAnime') {
           episodeUrl = `https://tokianime.tv/watch/${slug}/${episodeNumber}`;
         } else if (prov.name === 'TioAnime') {
@@ -888,10 +892,10 @@ app.get('/play/direct', async (req, res) => {
   try {
     const directUrl = await resolveToDirectLink(url, url);
     if (directUrl) {
-      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, TokiAnime, GnulaHD, etc.)
-      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru|owphbf24|bysevepoin|sprintcdn/i.test(directUrl) || 
+      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, TokiAnime, GnulaHD, Google Video, etc.)
+      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru|owphbf24|bysevepoin|sprintcdn|googlevideo\.com|redirector\.googlevideo/i.test(directUrl) || 
                             directUrl.includes('kjhhiuahiuhgihdf') ||
-                            (/voe|yourupload|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru|owphbf24|bysevepoin|sprintcdn/i.test(url) && !directUrl.includes('mp4upload'));
+                            (/voe|yourupload|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru|owphbf24|bysevepoin|sprintcdn|googlevideo\.com|redirector\.googlevideo/i.test(url) && !directUrl.includes('mp4upload'));
       
       if (isRestrictive) {
         const host = req.get('host');
@@ -954,6 +958,8 @@ app.get('/play/proxy/:encodedDir/*', async (req, res) => {
       headers['Referer'] = 'https://ww3.gnulahd.nu/';
     } else if (targetUrl.includes('mp4upload')) {
       headers['Referer'] = 'https://www.mp4upload.com/';
+    } else if (targetUrl.includes('googlevideo.com') || targetUrl.includes('redirector.googlevideo.com')) {
+      headers['Referer'] = 'https://www.blogger.com/';
     }
     
     const isPlaylist = filename.includes('.m3u8') || 

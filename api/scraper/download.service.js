@@ -50,7 +50,9 @@ async function resolveEmbedWithPuppeteer(url, referer) {
     let interceptedUrl = null;
     page.on("request", (req) => {
       const rUrl = req.url();
-      if (!interceptedUrl && (rUrl.includes('.m3u8') || rUrl.includes('.mp4')) && !rUrl.startsWith("blob:") && !rUrl.includes("blank")) {
+      if (!interceptedUrl && 
+          (rUrl.includes('.m3u8') || rUrl.includes('.mp4') || rUrl.includes('googlevideo.com/videoplayback') || rUrl.includes('redirector.googlevideo.com')) && 
+          !rUrl.startsWith("blob:") && !rUrl.includes("blank")) {
         // Exclude fake decoy playlists that consist of ad images (contains index-f or kjhhiuahiuhgihdf signature)
         if (rUrl.includes('index-f') || rUrl.includes('kjhhiuahiuhgihdf')) {
           return;
@@ -1100,6 +1102,14 @@ async function resolveEmbedUrl(url, record, candidate) {
   const referer = getRefererForUrl(candidate?.url || record?.url || url);
 
   debugLog("resolveEmbed", `Host: ${host}, Path: ${pathname}`, url);
+
+  // -1. BLOGGER EMBEDS
+  if (host.includes("blogger.com") && pathname.startsWith("/video.g")) {
+    debugLog("resolveEmbed", "Using Blogger resolver via Puppeteer", null);
+    const resolved = await resolveEmbedWithPuppeteer(url, referer);
+    if (resolved) return resolved;
+    throw new Error("No se pudo resolver enlace directo en Blogger");
+  }
 
   // 0. WRAPPED MP4UPLOAD EMBEDS
   if (host.includes("tokianime.tv") && pathname.includes("/mp4upload")) {
