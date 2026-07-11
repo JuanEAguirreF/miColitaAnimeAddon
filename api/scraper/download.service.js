@@ -1103,6 +1103,29 @@ async function resolveEmbedUrl(url, record, candidate) {
 
   debugLog("resolveEmbed", `Host: ${host}, Path: ${pathname}`, url);
 
+  // -2. TIOPLUS EMBEDS
+  if (host.includes("tioplus.app") && pathname.startsWith("/player/")) {
+    debugLog("resolveEmbed", "Resolving TioPlus player redirect in real-time", null);
+    try {
+      const res = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Referer': referer || 'https://tioplus.app/'
+        },
+        timeout: 6000
+      });
+      const match = res.data.match(/window\.location\.href\s*=\s*'([^']+)'/);
+      if (match && match[1]) {
+        debugLog("resolveEmbed", `TioPlus redirected to: ${match[1]}`, null);
+        return await resolveEmbedUrl(match[1], record, candidate);
+      }
+      throw new Error("No se pudo extraer la redirección en el player de TioPlus");
+    } catch (err) {
+      debugLog("resolveEmbed", `Error resolving TioPlus player: ${err.message}`, null);
+      return null;
+    }
+  }
+
   // -1. BLOGGER EMBEDS
   if (host.includes("blogger.com") && pathname.startsWith("/video.g")) {
     debugLog("resolveEmbed", "Using Blogger resolver via Puppeteer", null);
