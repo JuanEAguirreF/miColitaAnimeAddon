@@ -242,7 +242,7 @@ function getRefererForUrl(url) {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
     // If the URL is for a video host domain, don't use it as referer (bypasses anti-hotlinking / referrer checks)
-    if (/streamwish|sfastwish|flaswish|streamtape|voe|yourupload|mixdrop|vidhide/i.test(host)) {
+    if (/streamwish|sfastwish|flaswish|streamtape|voe|yourupload|mixdrop|mxdrop|vidhide/i.test(host)) {
       return "https://animeav1.com/";
     }
     return `${parsed.origin}/`;
@@ -1254,7 +1254,7 @@ async function resolveEmbedUrl(url, record, candidate) {
     if (resolved) return resolved;
   }
 
-  if (/mixdrop/i.test(host)) {
+  if (/mixdrop|mxdrop/i.test(host)) {
     debugLog("resolveEmbed", "Using Mixdrop resolver", null);
     const resolved = await resolveMixdropUrl(url, referer);
     if (resolved) return resolved;
@@ -1278,7 +1278,7 @@ async function resolveEmbedUrl(url, record, candidate) {
   }
 
   // 3. PUPPETEER PROTECTED SITE FALLBACK
-  const isProtectedSite = /animeflv|streamwish|vidhide|mixdrop/i.test(host);
+  const isProtectedSite = /animeflv|streamwish|vidhide|mixdrop|mxdrop/i.test(host);
   if (isProtectedSite) {
     debugLog("resolveEmbed", "Using puppeteer for protected site", null);
     const resolved = await resolveEmbedWithPuppeteer(url, referer);
