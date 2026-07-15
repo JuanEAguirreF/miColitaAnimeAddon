@@ -17,6 +17,7 @@ const tokianimeService = require('./scraper/tokianime.service');
 const gnulahdService = require('./scraper/gnulahd.service');
 const veranimeonlineService = require('./scraper/veranimeonline.service');
 const tioplusService = require('./scraper/tioplus.service');
+const latanimeService = require('./scraper/latanime.service');
 
 // Persistent HTTP/HTTPS Keep-Alive Agents to boost chunk downloading speed
 const keepAliveAgent = new https.Agent({
@@ -269,6 +270,7 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
     { name: 'TokiAnime', service: tokianimeService },
     { name: 'VerAnimeOnline', service: veranimeonlineService },
     { name: 'TioPlus', service: tioplusService },
+    { name: 'Latanime', service: latanimeService },
     { name: 'TioAnime', service: tioanimeService },
     { name: 'AnimeFLV', service: animeflvService },
     { name: 'AnimeAV1', service: animeav1Service },
@@ -316,6 +318,8 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
           episodeUrl = `https://veranimeonline.co/episodio/${slug}-episodio-${episodeNumber}/`;
         } else if (prov.name === 'TioPlus') {
           episodeUrl = `https://tioplus.app/anime/${slug}/season/1/episode/${episodeNumber}`;
+        } else if (prov.name === 'Latanime') {
+          episodeUrl = `https://latanime.org/ver/${slug}-episodio-${episodeNumber}`;
         } else if (prov.name === 'TokiAnime') {
           episodeUrl = `https://tokianime.tv/watch/${slug}/${episodeNumber}`;
         } else if (prov.name === 'TioAnime') {
