@@ -30,6 +30,12 @@ async function searchAnime(query) {
       
       // Clean up title (remove " Latino" or " Castellano" suffix if any)
       let title = rawTitle.replace(/\s+(Latino|Castellano)$/i, '').trim();
+      let lang = 'SUB';
+      if (rawTitle.toLowerCase().includes('latino') || href.includes('latino')) {
+        lang = 'LATINO';
+      } else if (rawTitle.toLowerCase().includes('castellano') || href.includes('castellano')) {
+        lang = 'CASTELLANO';
+      }
       
       if (href) {
         const parts = href.split('/anime/');
@@ -41,7 +47,8 @@ async function searchAnime(query) {
               title,
               slug,
               url: href.startsWith('http') ? href : `https://${DEFAULT_DOMAIN}${href}`,
-              type: 'Series'
+              type: 'Series',
+              lang
             });
           }
         }

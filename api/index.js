@@ -141,10 +141,10 @@ async function findSlugInProvider(service, animeName, providerName) {
     const searchResult = await service.searchAnime(animeName);
     if (searchResult && searchResult.success && searchResult.data.results.length > 0) {
       const results = searchResult.data.results;
-      // Prioritize results containing "Latino" in their title
+      // Prioritize results containing "Latino" in their title, lang property, or slug
       results.sort((a, b) => {
-        const aLat = (a.title || '').toUpperCase().includes('LATINO');
-        const bLat = (b.title || '').toUpperCase().includes('LATINO');
+        const aLat = (a.lang === 'LATINO') || (a.title || '').toUpperCase().includes('LATINO') || (a.slug || '').toLowerCase().includes('latino');
+        const bLat = (b.lang === 'LATINO') || (b.title || '').toUpperCase().includes('LATINO') || (b.slug || '').toLowerCase().includes('latino');
         if (aLat && !bLat) return -1;
         if (!aLat && bLat) return 1;
         return 0;
