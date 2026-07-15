@@ -143,6 +143,21 @@ async function findSlugInProvider(service, animeName, providerName) {
       const results = searchResult.data.results;
       const targetClean = cleanName(animeName);
 
+      // Helper to check if both titles have the exact same season numbers
+      const hasSameSeasonNumbers = (str1, str2) => {
+        const getNumbers = (s) => {
+          const matches = s.match(/\b(?:s|temporada|season)?\s*(\d+)\b/gi) || [];
+          return matches.map(m => {
+            const numMatch = m.match(/\d+/);
+            return numMatch ? numMatch[0] : '';
+          }).filter(n => n !== '');
+        };
+        const nums1 = getNumbers(str1);
+        const nums2 = getNumbers(str2);
+        if (nums1.length !== nums2.length) return false;
+        return nums1.every(n => nums2.includes(n));
+      };
+
       // 1. Check exact match
       for (const res of results) {
         if (cleanName(res.title) === targetClean) {
@@ -153,7 +168,7 @@ async function findSlugInProvider(service, animeName, providerName) {
       // 2. Check fuzzy match (includes)
       for (const res of results) {
         const cleanResTitle = cleanName(res.title);
-        if (cleanResTitle.includes(targetClean) || targetClean.includes(cleanResTitle)) {
+        if ((cleanResTitle.includes(targetClean) || targetClean.includes(cleanResTitle)) && hasSameSeasonNumbers(targetClean, cleanResTitle)) {
           return res.slug;
         }
       }
@@ -167,7 +182,7 @@ async function findSlugInProvider(service, animeName, providerName) {
           const resWords = cleanResTitle.split(' ').filter(w => w && !STOP_WORDS.has(w));
           const overlapCount = targetWords.filter(w => resWords.includes(w)).length;
           const ratio = overlapCount / targetWords.length;
-          if (ratio >= 0.5) {
+          if (ratio >= 0.5 && hasSameSeasonNumbers(targetClean, cleanResTitle)) {
             return res.slug;
           }
         }
@@ -253,7 +268,8 @@ function generateSeasonAliases(animeName) {
   const seasonRegexes = [
     { pattern: /\b(\d+)(st|nd|rd|th)\s+season\b/i, getNum: (m) => m[1] },
     { pattern: /\bseason\s+(\d+)\b/i, getNum: (m) => m[1] },
-    { pattern: /\bs(\d+)\b/i, getNum: (m) => m[1] }
+    { pattern: /\bs(\d+)\b/i, getNum: (m) => m[1] },
+    { pattern: /\b(\d+)$\b/i, getNum: (m) => m[1] }
   ];
   
   let seasonNum = null;
@@ -1137,6 +1153,15 @@ app.get('/stream/:type/:id.json', async (req, res) => {
     console.error(`[miColita Anime] Error processing streams for ${id}:`, err.message);
     return res.json({ streams: [] });
   }
+});
+
+// Route to manually clear memory caches
+app.get('/clear-cache', (req, res) => {
+  metaCache.clear();
+  streamCache.clear();
+  directLinkCache.clear();
+  console.log(`[miColita Anime] [Cache] All memory caches manually cleared by user request.`);
+  return res.send('Caché limpiado correctamente.');
 });
 
 module.exports = app;
