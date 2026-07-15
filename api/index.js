@@ -176,7 +176,7 @@ async function findSlugInProvider(service, animeName, providerName) {
       // 2. Check fuzzy match (includes)
       for (const res of results) {
         const cleanResTitle = cleanName(res.title);
-        if ((cleanResTitle.includes(targetClean) || targetClean.includes(cleanResTitle)) && hasSameSeasonNumbers(targetClean, cleanResTitle)) {
+        if ((cleanResTitle.includes(targetClean) || targetClean.includes(cleanResTitle)) && (providerName === 'Latanime' || providerName === 'GnulaHD' || hasSameSeasonNumbers(targetClean, cleanResTitle))) {
           return res.slug;
         }
       }
@@ -190,7 +190,7 @@ async function findSlugInProvider(service, animeName, providerName) {
           const resWords = cleanResTitle.split(' ').filter(w => w && !STOP_WORDS.has(w));
           const overlapCount = targetWords.filter(w => resWords.includes(w)).length;
           const ratio = overlapCount / targetWords.length;
-          if (ratio >= 0.5 && hasSameSeasonNumbers(targetClean, cleanResTitle)) {
+          if (ratio >= 0.5 && (providerName === 'Latanime' || providerName === 'GnulaHD' || hasSameSeasonNumbers(targetClean, cleanResTitle))) {
             return res.slug;
           }
         }
@@ -304,7 +304,7 @@ function generateSeasonAliases(animeName) {
 }
 
 // Multi-provider cascade scraper execution in parallel
-async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
+async function getAnimeStreams(animeName, episodeNumber, host, protocol, seasonNumber) {
   const cacheKey = `${cleanName(animeName)}:${episodeNumber}`;
   const cached = streamCache.get(cacheKey);
   const now = Date.now();
@@ -312,6 +312,24 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
   if (cached && (now - cached.timestamp < CACHE_TTL_STREAMS)) {
     console.log(`[miColita Anime] [Cache] Streams for ${animeName} E${episodeNumber} loaded from cache.`);
     return cached.data;
+  }
+
+  // Detect season number from animeName if not passed explicitly (e.g. for Kitsu)
+  let finalSeasonNumber = seasonNumber;
+  if (!finalSeasonNumber) {
+    const clean = (animeName || '').toLowerCase();
+    const matchSeason = clean.match(/(?:season|temporada|s)\s*(\d+)/i) || 
+                        clean.match(/(\d+)(?:nd|rd|th|st)\s*season/i);
+    if (matchSeason) {
+      finalSeasonNumber = parseInt(matchSeason[1], 10);
+    } else {
+      const matchEndDigit = clean.match(/\s+(\d+)$/);
+      if (matchEndDigit) {
+        finalSeasonNumber = parseInt(matchEndDigit[1], 10);
+      } else {
+        finalSeasonNumber = 1;
+      }
+    }
   }
 
   // 1. Resolve Romaji/Alternative titles from Kitsu
@@ -383,7 +401,7 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
             episodeUrl = `https://ww3.gnulahd.nu/ver/${slug}/`;
           } else {
             const paddedEp = String(episodeNumber).padStart(2, '0');
-            episodeUrl = `https://ww3.gnulahd.nu/${slug}-1x${paddedEp}/`;
+            episodeUrl = `https://ww3.gnulahd.nu/${slug}-${finalSeasonNumber}x${paddedEp}/`;
           }
         } else if (prov.name === 'VerAnimeOnline') {
           episodeUrl = `https://veranimeonline.co/episodio/${slug}-episodio-${episodeNumber}/`;
@@ -1130,6 +1148,7 @@ app.get('/stream/:type/:id.json', async (req, res) => {
 
   let animeId = '';
   let episodeNumber = 1;
+  let seasonNumber = null;
 
   if (id.startsWith('kitsu:')) {
     const parts = id.split(':');
@@ -1139,6 +1158,7 @@ app.get('/stream/:type/:id.json', async (req, res) => {
     const parts = id.split(':');
     animeId = parts[0];
     if (parts.length >= 3) {
+      seasonNumber = parseInt(parts[1] || '1', 10);
       episodeNumber = parseInt(parts[2] || '1', 10);
     }
   } else {
@@ -1155,7 +1175,7 @@ app.get('/stream/:type/:id.json', async (req, res) => {
     const animeName = meta.name;
     console.log(`[miColita Anime] Resolved title: "${animeName}" (Episode: ${episodeNumber})`);
 
-    const streams = await getAnimeStreams(animeName, episodeNumber, host, protocol);
+    const streams = await getAnimeStreams(animeName, episodeNumber, host, protocol, seasonNumber);
     return res.json({ streams });
   } catch (err) {
     console.error(`[miColita Anime] Error processing streams for ${id}:`, err.message);
@@ -1172,4 +1192,5 @@ app.get('/clear-cache', (req, res) => {
   return res.send('Caché limpiado correctamente.');
 });
 
+app.getAnimeStreams = getAnimeStreams;
 module.exports = app;
