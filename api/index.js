@@ -238,7 +238,45 @@ async function getAlternativeTitlesFromKitsu(name) {
   } catch (err) {
     console.error(`[miColita Anime] [Kitsu] Error fetching Kitsu titles:`, err.message);
   }
-  return [];
+}
+
+/**
+ * Generates alternative titles representing different season formats in Spanish (S2, Temporada 2, etc.)
+ * based on English patterns like '2nd Season', 'Season 3', 'S4'.
+ * @param {string} animeName 
+ * @returns {Array<string>}
+ */
+function generateSeasonAliases(animeName) {
+  const aliases = [];
+  const name = animeName.trim();
+  
+  const seasonRegexes = [
+    { pattern: /\b(\d+)(st|nd|rd|th)\s+season\b/i, getNum: (m) => m[1] },
+    { pattern: /\bseason\s+(\d+)\b/i, getNum: (m) => m[1] },
+    { pattern: /\bs(\d+)\b/i, getNum: (m) => m[1] }
+  ];
+  
+  let seasonNum = null;
+  let baseName = name;
+  
+  for (const rx of seasonRegexes) {
+    const match = name.match(rx.pattern);
+    if (match) {
+      seasonNum = rx.getNum(match);
+      baseName = name.replace(rx.pattern, '').replace(/\s+/g, ' ').trim();
+      break;
+    }
+  }
+  
+  if (seasonNum) {
+    aliases.push(`${baseName} S${seasonNum}`);
+    aliases.push(`${baseName} Temporada ${seasonNum}`);
+    aliases.push(`${baseName} ${seasonNum}`);
+    aliases.push(`${baseName} S${seasonNum} Latino`);
+    aliases.push(`${baseName} Temporada ${seasonNum} Latino`);
+  }
+  
+  return aliases;
 }
 
 // Multi-provider cascade scraper execution in parallel
@@ -254,12 +292,21 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
 
   // 1. Resolve Romaji/Alternative titles from Kitsu
   const searchNames = [animeName];
+  
+  const addIfUnique = (name) => {
+    if (name && !searchNames.includes(name)) {
+      searchNames.push(name);
+    }
+  };
+
+  // Inject aliases for the main title
+  generateSeasonAliases(animeName).forEach(addIfUnique);
+
   const kitsuNames = await getAlternativeTitlesFromKitsu(animeName);
   if (kitsuNames && kitsuNames.length > 0) {
     kitsuNames.forEach(name => {
-      if (!searchNames.includes(name)) {
-        searchNames.push(name);
-      }
+      addIfUnique(name);
+      generateSeasonAliases(name).forEach(addIfUnique);
     });
   }
 
@@ -412,7 +459,7 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
     }
   });
 
-  // Sort streams prioritizing GnulaHD Latino, then GnulaHD Castellano, then other Dubs, then Subs
+  // Sort streams prioritizing GnulaHD Latino, then other Latino, then GnulaHD Castellano, then other Castellano, then Subs
   const sortedStreams = [...streams].sort((a, b) => {
     const getScore = (s) => {
       const title = (s.title || '').toUpperCase();
@@ -421,10 +468,10 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol) {
       if (name.includes('GNULA') && title.includes('LATINO')) {
         return 100;
       }
-      if (name.includes('GNULA') && title.includes('CASTELLANO')) {
+      if (title.includes('LATINO')) {
         return 90;
       }
-      if (title.includes('LATINO')) {
+      if (name.includes('GNULA') && title.includes('CASTELLANO')) {
         return 80;
       }
       if (title.includes('CASTELLANO')) {
