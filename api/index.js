@@ -141,6 +141,14 @@ async function findSlugInProvider(service, animeName, providerName) {
     const searchResult = await service.searchAnime(animeName);
     if (searchResult && searchResult.success && searchResult.data.results.length > 0) {
       const results = searchResult.data.results;
+      // Prioritize results containing "Latino" in their title
+      results.sort((a, b) => {
+        const aLat = (a.title || '').toUpperCase().includes('LATINO');
+        const bLat = (b.title || '').toUpperCase().includes('LATINO');
+        if (aLat && !bLat) return -1;
+        if (!aLat && bLat) return 1;
+        return 0;
+      });
       const targetClean = cleanName(animeName);
 
       // Helper to check if both titles have the exact same season numbers
@@ -963,10 +971,10 @@ app.get('/play/direct', async (req, res) => {
   try {
     const directUrl = await resolveToDirectLink(url, url);
     if (directUrl) {
-      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, TokiAnime, GnulaHD, Google Video, etc.)
-      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru|owphbf24|bysevepoin|sprintcdn|googlevideo\.com|redirector\.googlevideo/i.test(directUrl) || 
+      // Check if URL requires universal streaming proxy (VOE, YourUpload, Zilla HLS, Streamwish CDN, TokiAnime, GnulaHD, Google Video, Mp4Upload, etc.)
+      const isRestrictive = /cloudwindow-route|voe|yourupload|zilla-networks|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru|owphbf24|bysevepoin|sprintcdn|googlevideo\.com|redirector\.googlevideo|mp4upload/i.test(directUrl) || 
                             directUrl.includes('kjhhiuahiuhgihdf') ||
-                            (/voe|yourupload|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru|owphbf24|bysevepoin|sprintcdn|googlevideo\.com|redirector\.googlevideo/i.test(url) && !directUrl.includes('mp4upload'));
+                            /voe|yourupload|streamwish|sfastwish|flaswish|tokianime|gnulahd|they\.tube|premilkyway|awishcdn|niramirus|hgplaycdn|hglamioz|medixiru|owphbf24|bysevepoin|sprintcdn|googlevideo\.com|redirector\.googlevideo|mp4upload/i.test(url);
       
       if (isRestrictive) {
         const host = req.get('host');
