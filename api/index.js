@@ -273,6 +273,20 @@ function generateSeasonAliases(animeName) {
   const aliases = [];
   const name = animeName.trim();
   
+  // If title contains "Part 2", "Parte 2", "Cour 2", etc., generate aliases without Part 2
+  const part2Regex = /\b(?:part\s*2|2nd\s*part|parte\s*2|2da\s*parte|cour\s*2|2nd\s*cour)\b/i;
+  if (part2Regex.test(name)) {
+    const nameWithoutPart = name.replace(part2Regex, '').replace(/\s+/g, ' ').trim();
+    if (nameWithoutPart && !aliases.includes(nameWithoutPart)) {
+      aliases.push(nameWithoutPart);
+      // Generate season aliases for the clean base name
+      const subAliases = generateSeasonAliases(nameWithoutPart);
+      subAliases.forEach(a => {
+        if (!aliases.includes(a)) aliases.push(a);
+      });
+    }
+  }
+
   const seasonRegexes = [
     { pattern: /\b(\d+)(st|nd|rd|th)\s+season\b/i, getNum: (m) => m[1] },
     { pattern: /\bseason\s+(\d+)\b/i, getNum: (m) => m[1] },
@@ -393,34 +407,43 @@ async function getAnimeStreams(animeName, episodeNumber, host, protocol, seasonN
       }
 
       if (slug) {
-        console.log(`[miColita Anime] [Scraper] Slug found in ${prov.name}: "${slug}" (using "${searchedName}"). Resolving episode ${episodeNumber}...`);
+        let epToUse = episodeNumber;
+        const isPart2Request = /\b(?:part\s*2|2nd\s*part|parte\s*2|2da\s*parte|cour\s*2|2nd\s*cour)\b/i.test(animeName);
+        const isSlugPart2 = /\b(?:part-?2|parte-?2|cour-?2)\b/i.test(slug);
+
+        if (isPart2Request && !isSlugPart2) {
+          epToUse = episodeNumber + 13;
+          console.log(`[miColita Anime] [Part 2 Offset] Adjusting episode ${episodeNumber} to unified season episode ${epToUse} for ${prov.name} (slug: "${slug}")`);
+        }
+
+        console.log(`[miColita Anime] [Scraper] Slug found in ${prov.name}: "${slug}" (using "${searchedName}"). Resolving episode ${epToUse}...`);
 
         let episodeUrl = '';
         if (prov.name === 'GnulaHD') {
-          if (!episodeNumber || episodeNumber === 0) {
+          if (!epToUse || epToUse === 0) {
             episodeUrl = `https://ww3.gnulahd.nu/ver/${slug}/`;
           } else {
-            const paddedEp = String(episodeNumber).padStart(2, '0');
+            const paddedEp = String(epToUse).padStart(2, '0');
             episodeUrl = `https://ww3.gnulahd.nu/${slug}-${finalSeasonNumber}x${paddedEp}/`;
           }
         } else if (prov.name === 'VerAnimeOnline') {
-          episodeUrl = `https://veranimeonline.co/episodio/${slug}-episodio-${episodeNumber}/`;
+          episodeUrl = `https://veranimeonline.co/episodio/${slug}-episodio-${epToUse}/`;
         } else if (prov.name === 'TioPlus') {
-          episodeUrl = `https://tioplus.app/anime/${slug}/season/1/episode/${episodeNumber}`;
+          episodeUrl = `https://tioplus.app/anime/${slug}/season/1/episode/${epToUse}`;
         } else if (prov.name === 'Latanime') {
-          episodeUrl = `https://latanime.org/ver/${slug}-episodio-${episodeNumber}`;
+          episodeUrl = `https://latanime.org/ver/${slug}-episodio-${epToUse}`;
         } else if (prov.name === 'TokiAnime') {
-          episodeUrl = `https://tokianime.tv/watch/${slug}/${episodeNumber}`;
+          episodeUrl = `https://tokianime.tv/watch/${slug}/${epToUse}`;
         } else if (prov.name === 'TioAnime') {
-          episodeUrl = `https://tioanime.com/ver/${slug}-${episodeNumber}`;
+          episodeUrl = `https://tioanime.com/ver/${slug}-${epToUse}`;
         } else if (prov.name === 'AnimeFLV') {
-          episodeUrl = `https://animeflv.net/ver/${slug}-${episodeNumber}`;
+          episodeUrl = `https://animeflv.net/ver/${slug}-${epToUse}`;
         } else if (prov.name === 'AnimeAV1') {
-          episodeUrl = `https://animeav1.com/media/${slug}/${episodeNumber}`;
+          episodeUrl = `https://animeav1.com/media/${slug}/${epToUse}`;
         } else if (prov.name === 'MonosChinos') {
-          episodeUrl = `https://monoschinos2.com/ver/${slug}-episodio-${episodeNumber}`;
+          episodeUrl = `https://monoschinos2.com/ver/${slug}-episodio-${epToUse}`;
         } else if (prov.name === 'JKAnime') {
-          episodeUrl = `https://jkanime.net/${slug}/${episodeNumber}/`;
+          episodeUrl = `https://jkanime.net/${slug}/${epToUse}/`;
         }
 
         // Fetch episode links with a 4s timeout
